@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 from . import model, media, analysis, writer
 
 APP = "BetterAAF"
-VERSION = "1.0"
+VERSION = "1.1"
 
 
 def fmt_db(x):
@@ -231,9 +231,9 @@ class Main(QMainWindow):
                              "Passer en mono et muter le canal R",
                              "Ne rien faire"])
         self.cb_mute = QComboBox()
-        self.cb_mute.addItems(["Clip désactivé (mute Avid / Media Composer)",
-                               "Gain de clip à −∞",
-                               "Déplacer sur une piste « MUTE »"])
+        self.cb_mute.addItems(["Déplacer sur une piste « MUTE » mutée",
+                               "Gain de clip à −144 dB",
+                               "Clip désactivé (mute Media Composer)"])
         ga.addWidget(QLabel("Clips dupliqués :"), 0, 0)
         ga.addWidget(self.cb_exact, 0, 1)
         ga.addWidget(QLabel("Quasi identiques :"), 0, 2)
@@ -424,7 +424,7 @@ class Main(QMainWindow):
             dup_action=acts[self.cb_exact.currentIndex()],
             near_action=acts[self.cb_near.currentIndex()],
             dm_action=["mono_delete", "mono_mute", "none"][self.cb_dm.currentIndex()],
-            mute_method=["avid", "gain", "track"][self.cb_mute.currentIndex()],
+            mute_method=["track", "gain", "avid"][self.cb_mute.currentIndex()],
             exact_uids=self.t_exact.checked(), near_uids=self.t_near.checked(),
             dm_uids=self.t_dm.checked())
         embed = self.ck_embed.isChecked()

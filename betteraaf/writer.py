@@ -12,6 +12,7 @@ from . import model, media
 
 MONO_GAIN_AUID = "9d2ea894-0968-11d3-8a38-0050040ef7d2"   # OperationDef_MonoAudioGain
 AMPLITUDE_AUID = "e4962321-2267-11d3-8a4c-0050040ef7d2"   # ParameterDef_Amplitude
+MUTE_AMPLITUDE = Fraction(34, 536870912)  # environ -144 dB, le minimum du gain de clip Pro Tools
 
 
 class Plan:
@@ -23,7 +24,7 @@ class Plan:
     *_uids : clips cochés (uid du modèle)."""
 
     def __init__(self, dup_action="delete", near_action="mute", dm_action="mono_delete",
-                 mute_method="avid", exact_uids=(), near_uids=(), dm_uids=()):
+                 mute_method="track", exact_uids=(), near_uids=(), dm_uids=()):
         self.dup_action, self.near_action, self.dm_action = dup_action, near_action, dm_action
         self.mute_method = mute_method
         self.exact_uids, self.near_uids, self.dm_uids = set(exact_uids), set(near_uids), set(dm_uids)
@@ -87,7 +88,7 @@ class Editor:
         og = self.f.create.OperationGroup(gain_def, component.length)
         og.media_kind = "sound"
         og.segments.append(component)
-        cv = self.f.create.ConstantValue(amp_def, Fraction(0, 1))
+        cv = self.f.create.ConstantValue(amp_def, MUTE_AMPLITUDE)
         og.parameters.append(cv)
         return og
 
@@ -141,32 +142,94 @@ class Editor:
         seq.length = cur
         return seq
 
-    def make_slot(self, track, name, seq, slot_id):
+    # ---------- attributs de piste (Avid / Resolve) ----------
+    def tv(self, name, value):
+        return self.f.create.TaggedValue(name, value, "aafInt32")
+
+    def set_track_attrs(self, slot, src_slot, stereo_format=None, muted=False):
+        """Attributs de piste façon Avid/Resolve : _TRACK_FORMAT absent = mono,
+        2 = stéréo ; AudioMixerCompMute = mute de piste.
+        - slot is src_slot : piste convertie en mono sur place, on retire juste le format ;
+        - sinon : nouvelle piste, on recopie les attributs de la source."""
+        if slot is src_slot:
+            if "TimelineMobAttributeList" in slot.keys():
+                lst = slot["TimelineMobAttributeList"]
+                for i in reversed(range(len(lst))):
+                    if lst[i].name == "_TRACK_FORMAT":
+                        lst.pop(i)
+            return
+        target = slot["TimelineMobAttributeList"]
+        if src_slot is not None and "TimelineMobAttributeList" in src_slot.keys():
+            for tv in src_slot["TimelineMobAttributeList"].value or []:
+                if tv.name not in ("_TRACK_FORMAT", "AudioMixerCompMute"):
+                    target.append(tv.copy())
+        if stereo_format and stereo_format >= 2:
+            target.append(self.tv("_TRACK_FORMAT", int(stereo_format)))
+        target.append(self.tv("AudioMixerCompMute", 1 if muted else 0))
+
+    def make_slot(self, track, name, seq, slot_id, stereo_format=None, muted=False):
         slot = self.f.create.TimelineMobSlot(slot_id, edit_rate=track.slot.edit_rate)
         slot.name = name
         slot.segment = seq
+        self.set_track_attrs(slot, track.slot, stereo_format, muted)
         return slot
 
-    def commit_tracks(self, rebuilt):
-        """rebuilt : {track.index: [(pos, comp)]} pistes entièrement reconstruites (mono).
+    @staticmethod
+    def track_format(slot):
+        v = None
+        if "TimelineMobAttributeList" in slot.keys():
+            for tv in slot["TimelineMobAttributeList"].value or []:
+                if tv.name == "_TRACK_FORMAT":
+                    v = tv.value
+        return v
+
+    # ---------- nettoyage des séquences ----------
+    def tidy(self, seq):
+        """Fusionne les vides consécutifs et retire les fondus coincés entre deux vides
+        (laissés par une suppression ou un déplacement de clip)."""
+        changed = True
+        while changed:
+            changed = False
+            comps = list(seq.components)
+            for i in range(len(comps) - 1):
+                a, b = comps[i], comps[i + 1]
+                if isinstance(a, Filler) and isinstance(b, Filler):
+                    seq.components[i] = self.filler(a.length + b.length)
+                    seq.components.pop(i + 1)
+                    changed = True
+                    break
+                if (i + 2 < len(comps) and isinstance(a, Filler) and
+                        type(b).__name__ == "Transition" and isinstance(comps[i + 2], Filler)):
+                    c = comps[i + 2]
+                    seq.components[i] = self.filler(a.length + c.length - b.length)
+                    seq.components.pop(i + 2)
+                    seq.components.pop(i + 1)
+                    changed = True
+                    break
+            comps = list(seq.components)
+            # fondu en tout début / fin de piste sans voisin
+            if comps and type(comps[0]).__name__ == "Transition":
+                seq.components.pop(0)
+                changed = True
+            elif comps and type(comps[-1]).__name__ == "Transition":
+                seq.components.pop(len(comps) - 1)
+                changed = True
+
+    def commit_tracks(self, mono_tracks):
+        """mono_tracks : index des pistes converties en mono en place.
         self.new_tracks : nouvelles pistes à insérer juste après leur piste source."""
         mob = self.comp.mob
         slots = list(mob.slots)
         used_ids = {s.slot_id for s in slots}
         next_id = max(used_ids) + 1 if used_ids else 1
 
-        # 1) pistes converties en place : nouveau slot même ID / même numéro
-        by_slot = {t.slot.slot_id: t for t in self.comp.tracks}
-        for tindex, items in rebuilt.items():
+        for t in self.comp.tracks:
+            self.tidy(t.sequence)
+        orig_fmt = {t.index: self.track_format(t.slot) for t in self.comp.tracks}
+        for tindex in mono_tracks:
             t = self.comp.tracks[tindex]
-            seq = self.build_sequence(items)
-            if seq.length < t.sequence.length:
-                seq.components.append(self.filler(t.sequence.length - seq.length))
-                seq.length = t.sequence.length
-            model.set_track_sequence(t.slot, seq)   # garde les effets de piste
-            t.sequence = seq
+            self.set_track_attrs(t.slot, t.slot, None, False)
 
-        # 2) nouvelles pistes, insérées après leur source, numéros renumérotés
         order = []  # pistes son dans l'ordre d'affichage (PhysicalTrackNumber)
         new_ids = set()
         suffix_rank = {"MONO": 0, "MONO R MUTE": 1, "R MUTE": 2, "MUTE": 3}
@@ -174,10 +237,14 @@ class Editor:
             order.append(("old", t))
             mine = [(s, items) for (ti, s), items in self.new_tracks.items() if ti == t.index]
             mine.sort(key=lambda x: suffix_rank.get(x[0], 9))
+            src_fmt = orig_fmt[t.index]
             for suffix, items in mine:
                 seq = self.build_sequence(items)
                 name = f"{t.name} {suffix}"
-                slot = self.make_slot(t, name, seq, next_id)
+                # "MUTE" reçoit les clips d'origine : même format que la source ;
+                # les autres reçoivent des clips mono
+                fmt = src_fmt if suffix == "MUTE" else None
+                slot = self.make_slot(t, name, seq, next_id, fmt, muted="MUTE" in suffix)
                 new_ids.add(next_id)
                 next_id += 1
                 pos_in_vec = list(mob.slots).index(t.slot) + 1
@@ -186,7 +253,7 @@ class Editor:
                     pos_in_vec += 1
                 mob.slots.insert(pos_in_vec, slot)
                 order.append(("new", slot))
-                self.log(f"Nouvelle piste : {name}")
+                self.log(f"Nouvelle piste : {name}" + (" (mutée)" if "MUTE" in suffix else ""))
         n = 1
         for kind, x in order:
             slot = x.slot if kind == "old" else x
@@ -356,15 +423,16 @@ def export(src_path, dst_path, comp_index, results, plan, log=print, progress=No
                           and not (plan.mute_method == "track" and c.uid in muted_uids)]
                 if not others:
                     # toute la piste est double mono : la piste devient mono
-                    items = []
+                    # (clips remplacés sur place : les fondus sont conservés)
                     for c in conv:
-                        items.append((c.position, ed.mono_component(c, 0)))
+                        mono = ed.mono_component(c, 0)
                         if mute_r:
                             r = ed.mono_component(c, 1)
                             if plan.mute_method != "track":
                                 r = ed.muted(r, plan.mute_method)
                             ed.add_to_new_track(t, "R MUTE", c.position, r)
-                    rebuilt[tindex] = items
+                        ed.replace(c, mono)
+                    rebuilt[tindex] = True
                     log(f"Piste « {t.name} » convertie en mono ({len(conv)} clips)")
                 else:
                     # au moins un clip réellement stéréo : les clips double mono
@@ -382,7 +450,7 @@ def export(src_path, dst_path, comp_index, results, plan, log=print, progress=No
                 stats["mono"] += len(conv)
 
         stats["new_tracks"] = len(ed.new_tracks)
-        ed.commit_tracks(rebuilt)
+        ed.commit_tracks(set(rebuilt))
         if embed:
             n, missing = embed_media(f, mob, src_path, media_dirs, log, progress)
             stats["embedded"] = n

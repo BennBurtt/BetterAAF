@@ -67,7 +67,7 @@ def is_muted(c):
                 continue
             for p in w.parameters:
                 v = p["Value"].value if "Value" in p.keys() else None
-                if v is not None and float(v) == 0.0:
+                if v is not None and float(v) <= 1e-6:
                     return True
         except Exception:
             pass

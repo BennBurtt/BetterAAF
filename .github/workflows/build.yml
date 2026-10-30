@@ -35,6 +35,8 @@ jobs:
         run: |
           python tests/make_test_aaf.py "$RUNNER_TEMP/t"
           ./dist/BetterAAF.app/Contents/MacOS/BetterAAF --selftest "$RUNNER_TEMP/t/test.aaf"
+          python tests/check_aaf.py "$RUNNER_TEMP/t/test.aaf" "$RUNNER_TEMP/t/test_selftest.aaf" | tee check.txt
+          ! grep -q "^ERR" check.txt
       - name: Zip
         run: |
           cd dist && ditto -c -k --sequesterRsrc --keepParent BetterAAF.app "../BetterAAF-${{ matrix.arch }}.zip"
@@ -59,7 +61,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ls -la dl
-          TAG="v1.0-build${{ github.run_number }}"
+          TAG="v1.1-build${{ github.run_number }}"
           gh release create "$TAG" dl/*.zip -R "${{ github.repository }}" \
             --title "BetterAAF (build ${{ github.run_number }})" \
             --notes "BetterAAF-AppleSilicon.zip : Mac M1/M2/M3/M4. BetterAAF-Intel.zip : Mac Intel. Dézippe, puis glisse BetterAAF.app dans Applications."

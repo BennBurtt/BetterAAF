@@ -97,6 +97,8 @@ with aaf2.open(aaf_path, "w") as f:
         slot = comp.create_sound_slot(SR)
         slot.name = name
         slot["PhysicalTrackNumber"].value = phys
+        if " ST" in name:   # piste stéréo, étiquetée comme le font Avid / Resolve
+            slot["TimelineMobAttributeList"].append(f.create.TaggedValue("_TRACK_FORMAT", 2, "aafInt32"))
         seq = slot.segment
         cur = 0
         for pos, c in items:
