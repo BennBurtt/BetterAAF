@@ -18,7 +18,7 @@ from . import model, media, analysis, writer
 
 APP = "BetterAAF"
 VERSION = "1.2"
-ACCENT = "#E0703A"
+ACCENT = "#8E4FD0"
 
 
 def resource(name):
@@ -32,7 +32,7 @@ QWidget {{ font-size: 13px; }}
 QLabel#Title {{ font-size: 22px; font-weight: 700; }}
 QLabel#Subtitle {{ color: palette(placeholder-text); }}
 QLabel#Muted {{ color: palette(placeholder-text); }}
-QLabel#Warn {{ color: {ACCENT}; }}
+QLabel#Warn {{ color: #D9822B; }}
 QLabel#Section {{ font-weight: 600; }}
 QFrame#Card {{ border: 1px solid palette(midlight); border-radius: 10px; }}
 QFrame#Drop {{ border: 2px dashed palette(mid); border-radius: 12px; }}
@@ -40,7 +40,7 @@ QFrame#Drop[active="true"] {{ border: 2px dashed {ACCENT}; }}
 QLabel#DropTitle {{ font-size: 15px; font-weight: 600; }}
 QPushButton {{ padding: 6px 14px; border-radius: 6px; }}
 QPushButton#Primary {{ background: {ACCENT}; color: white; border: none; font-weight: 600; padding: 8px 20px; }}
-QPushButton#Primary:hover {{ background: #EA8250; }}
+QPushButton#Primary:hover {{ background: #9F64DD; }}
 QPushButton#Primary:disabled {{ background: palette(midlight); color: palette(mid); }}
 QPushButton#Link {{ border: none; color: {ACCENT}; padding: 2px 4px; }}
 QProgressBar {{ border: none; background: palette(midlight); max-height: 4px; min-height: 4px; border-radius: 2px; }}
