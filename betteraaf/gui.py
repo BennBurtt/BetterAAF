@@ -1,4 +1,7 @@
-"""BetterAAF user interface (PyQt6)."""
+"""BetterAAF user interface (PyQt6).
+
+Three columns: settings on the left, read-only results in the middle,
+export choices on the right. Monochrome theme matching the logo."""
 
 import math
 import os
@@ -7,18 +10,26 @@ import traceback
 
 import aaf2
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
-from PyQt6.QtGui import QAction, QColor, QPixmap, QIcon, QFont
+from PyQt6.QtGui import QAction, QColor, QPixmap, QIcon, QPalette
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QFileDialog, QDoubleSpinBox, QComboBox,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
-    QFrame, QCheckBox, QPlainTextEdit, QMessageBox, QAbstractItemView, QStyleFactory)
+    QFrame, QCheckBox, QPlainTextEdit, QMessageBox, QAbstractItemView, QStyleFactory,
+    QScrollArea)
 
 from . import model, media, analysis, writer, classify, levels
 
 APP = "BetterAAF"
-VERSION = "1.4"
-ACCENT = "#8E4FD0"
+VERSION = "1.5"
+
+INK = "#0A0A0A"        # fond
+PANEL = "#131313"
+LINE = "#242424"
+FIELD = "#181818"
+PAPER = "#F5F3EE"      # blanc cassé du logo
+GREY = "#8C8A85"
+WARN = "#E5A04B"
 
 
 def resource(name):
@@ -27,34 +38,76 @@ def resource(name):
     return os.path.join(base, "assets", name)
 
 
+CHECK = resource("check.png").replace("\\", "/")
+
 STYLE = f"""
-QWidget {{ font-size: 13px; }}
-QLabel#Title {{ font-size: 22px; font-weight: 700; }}
-QLabel#Subtitle {{ color: palette(placeholder-text); }}
-QLabel#Muted {{ color: palette(placeholder-text); }}
-QLabel#Warn {{ color: #D9822B; }}
-QLabel#Section {{ font-weight: 600; }}
-QLabel#Big {{ font-size: 17px; font-weight: 700; }}
-QLabel#Small {{ font-size: 11px; color: palette(placeholder-text); }}
-QLabel#RowHead {{ font-weight: 600; color: palette(placeholder-text); }}
-QFrame#Card {{ border: 1px solid palette(midlight); border-radius: 10px; }}
-QFrame#Drop {{ border: 2px dashed palette(mid); border-radius: 12px; }}
-QFrame#Drop[active="true"] {{ border: 2px dashed {ACCENT}; }}
-QLabel#DropTitle {{ font-size: 15px; font-weight: 600; }}
-QPushButton {{ padding: 6px 14px; border-radius: 6px; }}
-QPushButton#Primary {{ background: {ACCENT}; color: white; border: none; font-weight: 600; padding: 8px 20px; }}
-QPushButton#Primary:hover {{ background: #9F64DD; }}
-QPushButton#Primary:disabled {{ background: palette(midlight); color: palette(mid); }}
-QPushButton#Link {{ border: none; color: {ACCENT}; padding: 2px 4px; }}
-QProgressBar {{ border: none; background: palette(midlight); max-height: 4px; min-height: 4px; border-radius: 2px; }}
-QProgressBar::chunk {{ background: {ACCENT}; border-radius: 2px; }}
-QTableWidget {{ border: none; gridline-color: transparent; }}
-QHeaderView::section {{ border: none; border-bottom: 1px solid palette(midlight); padding: 6px 8px;
-                        background: transparent; font-weight: 600; }}
-QTabWidget::pane {{ border: 1px solid palette(midlight); border-radius: 10px; top: -1px; }}
-QTabBar::tab {{ padding: 7px 16px; border: none; margin-right: 2px; }}
-QTabBar::tab:selected {{ border-bottom: 2px solid {ACCENT}; font-weight: 600; }}
+QWidget {{ font-size: 13px; color: {PAPER}; }}
+QMainWindow, QWidget#Root {{ background: {INK}; }}
+QFrame#Panel {{ background: {PANEL}; border: 1px solid {LINE}; border-radius: 14px; }}
+QFrame#Panel QLabel, QFrame#Panel QCheckBox {{ background: transparent; }}
+QLabel#Title {{ font-size: 20px; font-weight: 800; letter-spacing: 0.5px; }}
+QLabel#Version {{ color: {GREY}; font-size: 11px; }}
+QLabel#Section {{ color: {GREY}; font-size: 11px; font-weight: 700; letter-spacing: 1.6px; }}
+QLabel#Muted {{ color: {GREY}; }}
+QLabel#Small {{ color: {GREY}; font-size: 11px; }}
+QLabel#Warn {{ color: {WARN}; font-size: 12px; }}
+QLabel#Big {{ font-size: 26px; font-weight: 800; }}
+QLabel#Stat {{ font-size: 30px; font-weight: 800; }}
+QLabel#RowHead {{ color: {GREY}; font-weight: 700; font-size: 11px; letter-spacing: 1.2px; }}
+QFrame#Drop {{ border: 1.5px dashed #3A3A3A; border-radius: 12px; background: {FIELD}; }}
+QFrame#Drop[active="true"] {{ border: 1.5px dashed {PAPER}; }}
+QLabel#DropTitle {{ font-size: 14px; font-weight: 700; }}
+QLineEdit, QDoubleSpinBox, QComboBox {{ background: {FIELD}; border: 1px solid {LINE}; border-radius: 7px;
+                                        padding: 5px 8px; selection-background-color: {PAPER};
+                                        selection-color: {INK}; }}
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{ width: 0px; border: none; }}
+QLineEdit:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border: 1px solid #5A5A5A; }}
+QComboBox QAbstractItemView {{ background: {FIELD}; border: 1px solid {LINE}; selection-background-color: {PAPER};
+                               selection-color: {INK}; }}
+QPushButton {{ background: transparent; border: 1px solid #3A3A3A; border-radius: 8px; padding: 7px 14px; }}
+QPushButton:hover {{ border-color: {PAPER}; }}
+QPushButton#Primary {{ background: {PAPER}; color: {INK}; border: none; font-weight: 800; padding: 11px 18px;
+                       letter-spacing: 0.6px; }}
+QPushButton#Primary:hover {{ background: #FFFFFF; }}
+QPushButton#Primary:disabled {{ background: #2A2A2A; color: #5A5A5A; }}
+QPushButton#Link {{ border: none; color: {GREY}; padding: 2px 4px; }}
+QPushButton#Link:hover {{ color: {PAPER}; }}
+QCheckBox {{ spacing: 8px; }}
+QCheckBox::indicator {{ width: 15px; height: 15px; border: 1px solid #4A4A4A; border-radius: 4px; background: {FIELD}; }}
+QCheckBox::indicator:checked {{ background: {PAPER}; border: 1px solid {PAPER}; image: url({CHECK}); }}
+QCheckBox:disabled {{ color: #555; }}
+QProgressBar {{ border: none; background: #222; max-height: 3px; min-height: 3px; border-radius: 1px; }}
+QProgressBar::chunk {{ background: {PAPER}; border-radius: 1px; }}
+QTableWidget {{ background: {PANEL}; alternate-background-color: #171717; border: none; gridline-color: transparent;
+               selection-background-color: #2A2A2A; selection-color: {PAPER}; }}
+QTableWidget::indicator {{ width: 14px; height: 14px; border: 1px solid #4A4A4A; border-radius: 3px; background: {FIELD}; }}
+QTableWidget::indicator:checked {{ background: {PAPER}; border: 1px solid {PAPER}; image: url({CHECK}); }}
+QHeaderView::section {{ background: {PANEL}; color: {GREY}; border: none; border-bottom: 1px solid {LINE};
+                        padding: 6px 8px; font-weight: 700; font-size: 11px; }}
+QTableCornerButton::section {{ background: {PANEL}; border: none; }}
+QTabWidget::pane {{ border: 1px solid {LINE}; border-radius: 14px; background: {PANEL}; top: -1px; }}
+QTabBar::tab {{ background: transparent; color: {GREY}; padding: 8px 14px; border: none; margin-right: 4px;
+               font-weight: 600; }}
+QTabBar::tab:selected {{ color: {PAPER}; border-bottom: 2px solid {PAPER}; }}
+QPlainTextEdit {{ background: {PANEL}; border: none; font-family: Menlo, monospace; font-size: 12px; }}
+QScrollBar:vertical {{ background: transparent; width: 9px; }}
+QScrollBar::handle:vertical {{ background: #333; border-radius: 4px; min-height: 30px; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
+QScrollBar:horizontal {{ background: transparent; height: 9px; }}
+QScrollBar::handle:horizontal {{ background: #333; border-radius: 4px; min-width: 30px; }}
+QToolTip {{ background: {FIELD}; color: {PAPER}; border: 1px solid {LINE}; padding: 6px; }}
 """
+
+
+def dark_palette():
+    p = QPalette()
+    R = QPalette.ColorRole
+    for role, c in [(R.Window, INK), (R.WindowText, PAPER), (R.Base, FIELD), (R.AlternateBase, "#171717"),
+                    (R.Text, PAPER), (R.Button, FIELD), (R.ButtonText, PAPER), (R.Mid, "#3A3A3A"),
+                    (R.Midlight, LINE), (R.Highlight, PAPER), (R.HighlightedText, INK),
+                    (R.PlaceholderText, GREY), (R.ToolTipBase, FIELD), (R.ToolTipText, PAPER)]:
+        p.setColor(role, QColor(c))
+    return p
 
 
 def fmt_db(x):
@@ -85,25 +138,31 @@ class Worker(QThread):
             self.failed.emit(f"{e}\n\n{traceback.format_exc()}")
 
 
+def table_style(t):
+    h = t.horizontalHeader()
+    h.setStretchLastSection(True)
+    h.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    h.setHighlightSections(False)
+    t.setShowGrid(False)
+    t.verticalHeader().setVisible(False)
+    t.verticalHeader().setDefaultSectionSize(30)
+    t.setAlternatingRowColors(True)
+    t.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    t.setFrameShape(QFrame.Shape.NoFrame)
+
+
 class FindingTable(QTableWidget):
     KEYS = ["track", "clip", "tc", "dur", "ref", "res", "note"]
 
     def __init__(self, ref_label="Kept clip"):
-        cols = ["", "Track", "Clip", "Start", "Duration", ref_label, "Residual", "Note"]
+        cols = ["", "TRACK", "CLIP", "START", "DURATION", ref_label.upper(), "RESIDUAL", "NOTE"]
         super().__init__(0, len(cols))
         self.setHorizontalHeaderLabels(cols)
-        h = self.horizontalHeader()
-        h.setStretchLastSection(True)
-        h.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        for i, w in enumerate([34, 140, 220, 100, 80, 260, 90]):
+        table_style(self)
+        for i, w in enumerate([34, 130, 190, 96, 76, 240, 80]):
             self.setColumnWidth(i, w)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.setShowGrid(False)
-        self.verticalHeader().setVisible(False)
-        self.verticalHeader().setDefaultSectionSize(28)
-        self.setAlternatingRowColors(True)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def fill(self, rows):
         self.setRowCount(0)
@@ -122,7 +181,7 @@ class FindingTable(QTableWidget):
             for j, k in enumerate(self.KEYS, 1):
                 it = QTableWidgetItem(str(r.get(k, "")))
                 if not enabled:
-                    it.setForeground(QColor(140, 140, 140))
+                    it.setForeground(QColor(GREY))
                 self.setItem(i, j, it)
 
     def checked(self):
@@ -143,7 +202,7 @@ class FindingTable(QTableWidget):
 def table_page(table, hint):
     w = QWidget()
     v = QVBoxLayout(w)
-    v.setContentsMargins(10, 10, 10, 6)
+    v.setContentsMargins(12, 10, 12, 8)
     h = QHBoxLayout()
     lb = QLabel(hint)
     lb.setObjectName("Muted")
@@ -166,15 +225,17 @@ class DropZone(QFrame):
         super().__init__()
         self.setObjectName("Drop")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(86)
+        self.setMinimumHeight(96)
         v = QVBoxLayout(self)
         v.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title = QLabel("Drop an AAF here")
         self.title.setObjectName("DropTitle")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title.setWordWrap(True)
         self.sub = QLabel("or click to browse")
-        self.sub.setObjectName("Muted")
+        self.sub.setObjectName("Small")
         self.sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sub.setWordWrap(True)
         v.addWidget(self.title)
         v.addWidget(self.sub)
 
@@ -187,188 +248,58 @@ class DropZone(QFrame):
         self.clicked.emit()
 
 
+def panel(title=None):
+    f = QFrame()
+    f.setObjectName("Panel")
+    v = QVBoxLayout(f)
+    v.setContentsMargins(16, 14, 16, 16)
+    v.setSpacing(10)
+    if title:
+        lb = QLabel(title.upper())
+        lb.setObjectName("Section")
+        v.addWidget(lb)
+    return f, v
+
+
+def field(label, widget):
+    box = QVBoxLayout()
+    box.setSpacing(4)
+    lb = QLabel(label)
+    lb.setObjectName("Small")
+    box.addWidget(lb)
+    box.addWidget(widget)
+    return box
+
+
 class Main(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP)
-        self.resize(1180, 880)
-        self.setMinimumSize(900, 640)
+        self.resize(1480, 900)
+        self.setMinimumSize(1240, 760)
         self.setAcceptDrops(True)
         self.settings = QSettings("BenjaminMartin", APP)
         self.aaf_path = ""
         self.results = None
+        self.comp = None
         self.comp_index = 0
         self.worker = None
+        self.edited_names = {}
+        self._filling = False
 
         root = QWidget()
+        root.setObjectName("Root")
         self.setCentralWidget(root)
-        v = QVBoxLayout(root)
-        v.setContentsMargins(22, 18, 22, 18)
-        v.setSpacing(12)
-
-        # --- header
-        head = QHBoxLayout()
-        head.setSpacing(12)
-        logo_path = resource("logo.png")
-        if os.path.exists(logo_path):
-            logo = QLabel()
-            pm = QPixmap(logo_path)
-            logo.setPixmap(pm.scaledToHeight(44, Qt.TransformationMode.SmoothTransformation))
-            head.addWidget(logo)
-        tbox = QVBoxLayout()
-        tbox.setSpacing(0)
-        title = QLabel(APP)
-        title.setObjectName("Title")
-        sub = QLabel("Find duplicate, near-identical and dual-mono clips in an AAF, and clean them up.")
-        sub.setObjectName("Subtitle")
-        tbox.addWidget(title)
-        tbox.addWidget(sub)
-        head.addLayout(tbox, 1)
-        ver = QLabel("v" + VERSION)
-        ver.setObjectName("Muted")
-        head.addWidget(ver, 0, Qt.AlignmentFlag.AlignTop)
-        v.addLayout(head)
-
-        # --- drop zone
-        self.drop = DropZone()
-        self.drop.clicked.connect(self.choose_aaf)
-        v.addWidget(self.drop)
-
-        # --- options row
-        g = QGridLayout()
-        g.setHorizontalSpacing(10)
-        g.setVerticalSpacing(8)
-        self.ed_media = QLineEdit(self.settings.value("media_dir", ""))
-        self.ed_media.setPlaceholderText("Optional: where to look for audio files that have moved")
-        self.ed_media.setClearButtonEnabled(True)
-        b_media = QPushButton("Browse…")
-        b_media.clicked.connect(self.choose_media)
-        g.addWidget(QLabel("Audio files folder"), 0, 0)
-        g.addWidget(self.ed_media, 0, 1, 1, 4)
-        g.addWidget(b_media, 0, 5)
-
-        self.sp_dup = self.db_spin("dup_db", "Two overlapping clips count as near-identical "
-                                             "when their null test falls below this level.")
-        self.sp_dm = self.db_spin("dm_db", "A stereo clip counts as dual mono when L minus R falls below this level.")
-        g.addWidget(QLabel("Near-identical below"), 1, 0)
-        g.addWidget(self.sp_dup, 1, 1)
-        g.addWidget(QLabel("Dual mono below"), 1, 2)
-        g.addWidget(self.sp_dm, 1, 3)
-        self.cb_comp = QComboBox()
-        self.cb_comp.setVisible(False)
-        self.b_analyze = QPushButton("Analyze")
-        self.b_analyze.setObjectName("Primary")
-        self.b_analyze.clicked.connect(self.analyze)
-        g.addWidget(self.b_analyze, 1, 5)
-        self.ck_levels = self.check("Measure levels (whole AAF played together)", "levels", True)
-        self.ck_levels.setToolTip("Mix of all tracks: muted clips and tracks skipped, clip gain and fades applied,\n"
-                                  "mono tracks centred (-3 dB pan law). Track volume automation is ignored.")
-        lv_row = QHBoxLayout()
-        lv_row.addSpacing(16)
-        lv_row.addWidget(self.ck_levels)
-        lv_row.addWidget(self.cb_comp)
-        lv_row.addStretch(1)
-        g.addLayout(lv_row, 1, 4)
-        g.setColumnStretch(4, 1)
-        v.addLayout(g)
-
-        # --- progress
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 1000)
-        self.progress.setTextVisible(False)
-        self.status = QLabel("Ready.")
-        self.status.setObjectName("Muted")
-        v.addWidget(self.progress)
-        v.addWidget(self.status)
-        v.addWidget(self.make_levels_card())
-
-        # --- results
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(False)
-        self.t_exact = FindingTable()
-        self.t_near = FindingTable()
-        self.t_dm = FindingTable("Right channel")
-        self.tabs.addTab(table_page(self.t_exact, "Clips fully covered by the same audio on a higher track."),
-                         "Duplicates")
-        self.tabs.addTab(table_page(self.t_near, "Same as above, but the null test leaves a residual below "
-                                                 "the threshold."), "Near-identical")
-        self.tabs.addTab(table_page(self.t_dm, "Stereo clips whose left and right channels null out."),
-                         "Dual mono")
-        self.tabs.addTab(self.make_tracks_page(), "Tracks")
-        self.log_box = QPlainTextEdit()
-        self.log_box.setReadOnly(True)
-        self.log_box.setFrameShape(QFrame.Shape.NoFrame)
-        logw = QWidget()
-        lv = QVBoxLayout(logw)
-        lv.setContentsMargins(10, 10, 10, 10)
-        lv.addWidget(self.log_box)
-        self.tabs.addTab(logw, "Log")
-        v.addWidget(self.tabs, 1)
-
-        # --- actions
-        card = QFrame()
-        card.setObjectName("Card")
-        ga = QGridLayout(card)
-        ga.setContentsMargins(16, 12, 16, 14)
-        ga.setHorizontalSpacing(12)
-        ga.setVerticalSpacing(8)
-        sec = QLabel("On export")
-        sec.setObjectName("Section")
-        ga.addWidget(sec, 0, 0, 1, 4)
-        self.cb_exact = self.combo(["Delete", "Mute", "Leave as is"], "exact_action", 0)
-        self.cb_near = self.combo(["Delete", "Mute", "Leave as is"], "near_action", 1)
-        self.cb_dm = self.combo(["Make mono, delete the right channel",
-                                 "Make mono, mute the right channel",
-                                 "Leave as is"], "dm_action", 0)
-        self.cb_mute = self.combo(["Move to a muted “MUTE” track",
-                                   "Clip gain to −144 dB",
-                                   "Disable clip (Media Composer style)"], "mute_method", 0)
-        ga.addWidget(QLabel("Duplicates"), 1, 0)
-        ga.addWidget(self.cb_exact, 1, 1)
-        ga.addWidget(QLabel("Near-identical"), 1, 2)
-        ga.addWidget(self.cb_near, 1, 3)
-        ga.addWidget(QLabel("Dual mono"), 2, 0)
-        ga.addWidget(self.cb_dm, 2, 1)
-        ga.addWidget(QLabel("Mute by"), 2, 2)
-        ga.addWidget(self.cb_mute, 2, 3)
-        self.ck_rename = self.check("Rename tracks by content", "rename", True)
-        self.ck_dm = self.check("Rename tracks DM for dual mono", "dm_tag", True)
-        self.ck_embed = self.check("Self-contained AAF (embed all audio)", "embed", False)
-        opts = QHBoxLayout()
-        opts.setSpacing(18)
-        for ck in (self.ck_rename, self.ck_dm, self.ck_embed):
-            opts.addWidget(ck)
-        opts.addStretch(1)
-        self.ck_rename.setToolTip("Dialogue, Music, FX, Others (see the Tracks tab)")
-        self.ck_embed.setToolTip("Every audio file is copied into a single AAF")
-        ga.addLayout(opts, 3, 0, 1, 4)
-        if not classify.available():
-            self.ck_rename.setChecked(False)
-            self.ck_rename.setEnabled(False)
-            self.ck_rename.setToolTip("Content detection model not included in this build.")
-        self.b_export = QPushButton("Export AAF…")
-        self.b_export.setObjectName("Primary")
-        self.b_export.setEnabled(False)
-        self.b_export.clicked.connect(self.export)
-
-        self.lb_notes = QLabel()
-        self.lb_notes.setObjectName("Warn")
-        self.lb_notes.setWordWrap(True)
-        ga.addWidget(self.lb_notes, 4, 0, 1, 3)
-        foot = QLabel("When a stereo track also holds true stereo clips, its dual-mono clips move to a new "
-                      "“… DM” (or “… MONO”) track. The original AAF is never modified.")
-        foot.setObjectName("Muted")
-        foot.setWordWrap(True)
-        ga.addWidget(foot, 5, 0, 1, 3)
-        ga.addWidget(self.b_export, 4, 3, 2, 1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
-        ga.setColumnStretch(1, 1)
-        ga.setColumnStretch(3, 1)
-        v.addWidget(card)
+        cols = QHBoxLayout(root)
+        cols.setContentsMargins(18, 18, 18, 18)
+        cols.setSpacing(16)
+        cols.addWidget(self.build_left(), 0)
+        cols.addWidget(self.build_center(), 1)
+        cols.addWidget(self.build_right(), 0)
 
         for cb in (self.cb_exact, self.cb_near, self.cb_dm, self.cb_mute):
             cb.currentIndexChanged.connect(self.update_notes)
         self.ck_dm.toggled.connect(self.update_notes)
-        self.ck_rename.toggled.connect(lambda on: on and self.comp is not None and self.analyze())
         self.update_notes()
 
         act = QAction("Open…", self)
@@ -376,7 +307,279 @@ class Main(QMainWindow):
         act.triggered.connect(self.choose_aaf)
         self.addAction(act)
 
-    # ---------- small helpers ----------
+    # ================================================================ left
+    def build_left(self):
+        col = QWidget()
+        col.setFixedWidth(300)
+        v = QVBoxLayout(col)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(14)
+
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        head.setSpacing(6)
+        logo_path = resource("logo.png")
+        title = QLabel("Better" if os.path.exists(logo_path) else APP)
+        title.setObjectName("Title")
+        head.addWidget(title, 0, Qt.AlignmentFlag.AlignVCenter)
+        if os.path.exists(logo_path):
+            logo = QLabel()
+            logo.setPixmap(QPixmap(logo_path).scaledToHeight(21, Qt.TransformationMode.SmoothTransformation))
+            head.addWidget(logo, 0, Qt.AlignmentFlag.AlignVCenter)
+        head.addStretch(1)
+        ver = QLabel("v" + VERSION)
+        ver.setObjectName("Version")
+        head.addWidget(ver)
+        v.addLayout(head)
+
+        p, pv = panel("Source")
+        self.drop = DropZone()
+        self.drop.clicked.connect(self.choose_aaf)
+        pv.addWidget(self.drop)
+        self.cb_comp = QComboBox()
+        self.cb_comp.setVisible(False)
+        pv.addWidget(self.cb_comp)
+        self.ed_media = QLineEdit(self.settings.value("media_dir", ""))
+        self.ed_media.setPlaceholderText("Only if audio files have moved")
+        self.ed_media.setClearButtonEnabled(True)
+        row = QHBoxLayout()
+        row.addWidget(self.ed_media, 1)
+        b_media = QPushButton("…")
+        b_media.setFixedWidth(40)
+        b_media.setToolTip("Choose the audio files folder")
+        b_media.clicked.connect(self.choose_media)
+        row.addWidget(b_media)
+        box = QVBoxLayout()
+        box.setSpacing(4)
+        lb = QLabel("Audio files folder")
+        lb.setObjectName("Small")
+        box.addWidget(lb)
+        box.addLayout(row)
+        pv.addLayout(box)
+        v.addWidget(p)
+
+        p, pv = panel("Analysis")
+        self.sp_dup = self.db_spin("dup_db", "Two overlapping clips count as near-identical "
+                                             "when their null test falls below this level.")
+        self.sp_dm = self.db_spin("dm_db", "A stereo clip counts as dual mono when L minus R falls below this level.")
+        g = QHBoxLayout()
+        g.setSpacing(10)
+        g.addLayout(field("Near-identical below", self.sp_dup))
+        g.addLayout(field("Dual mono below", self.sp_dm))
+        pv.addLayout(g)
+        self.ck_listen = self.check("Detect content (Google YAMNet)", "listen", True)
+        self.ck_listen.setToolTip("Listens to every clip to tell dialogue, music, FX and others apart.")
+        self.ck_levels = self.check("Measure levels (whole AAF)", "levels", True)
+        self.ck_levels.setToolTip("Mix of all tracks: muted clips and tracks skipped, clip gain and fades applied,\n"
+                                  "mono tracks centred (-3 dB pan law). Track volume automation is ignored.")
+        if not classify.available():
+            self.ck_listen.setChecked(False)
+            self.ck_listen.setEnabled(False)
+        pv.addWidget(self.ck_listen)
+        pv.addWidget(self.ck_levels)
+        v.addWidget(p)
+
+        v.addStretch(1)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1000)
+        self.progress.setTextVisible(False)
+        self.status = QLabel("Ready.")
+        self.status.setObjectName("Small")
+        self.status.setWordWrap(True)
+        v.addWidget(self.progress)
+        v.addWidget(self.status)
+        self.b_analyze = QPushButton("ANALYZE")
+        self.b_analyze.setObjectName("Primary")
+        self.b_analyze.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.b_analyze.clicked.connect(self.analyze)
+        v.addWidget(self.b_analyze)
+        return col
+
+    # ================================================================ center
+    def build_center(self):
+        col = QWidget()
+        v = QVBoxLayout(col)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(14)
+
+        # stat tiles
+        tiles = QHBoxLayout()
+        tiles.setSpacing(12)
+        self.stats = {}
+        for key, label in (("exact", "Duplicates"), ("near", "Near-identical"), ("dm", "Dual mono"),
+                           ("clips", "Clips")):
+            f, fv = panel()
+            fv.setSpacing(2)
+            n = QLabel("–")
+            n.setObjectName("Stat")
+            lb = QLabel(label.upper())
+            lb.setObjectName("Section")
+            fv.addWidget(n)
+            fv.addWidget(lb)
+            self.stats[key] = n
+            tiles.addWidget(f)
+        v.addLayout(tiles)
+
+        v.addWidget(self.make_levels_card())
+
+        self.tabs = QTabWidget()
+        self.t_exact = FindingTable()
+        self.t_near = FindingTable()
+        self.t_dm = FindingTable("Right channel")
+        self.tabs.addTab(table_page(self.t_exact, "Clips fully covered by the same audio on a higher track."),
+                         "Duplicates")
+        self.tabs.addTab(table_page(self.t_near, "Same, but the null test leaves a residual below the threshold."),
+                         "Near-identical")
+        self.tabs.addTab(table_page(self.t_dm, "Stereo clips whose left and right channels null out."),
+                         "Dual mono")
+        self.t_content = QTableWidget(0, 2)
+        self.t_content.setHorizontalHeaderLabels(["TRACK", "CONTENT"])
+        table_style(self.t_content)
+        self.t_content.setColumnWidth(0, 220)
+        self.t_content.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        cw = QWidget()
+        cv = QVBoxLayout(cw)
+        cv.setContentsMargins(12, 10, 12, 8)
+        hint = QLabel("What Google's YAMNet model hears on each track (share of clip time).")
+        hint.setObjectName("Muted")
+        cv.addWidget(hint)
+        cv.addWidget(self.t_content)
+        self.tabs.addTab(cw, "Content")
+        self.log_box = QPlainTextEdit()
+        self.log_box.setReadOnly(True)
+        lw = QWidget()
+        lv = QVBoxLayout(lw)
+        lv.setContentsMargins(12, 10, 12, 10)
+        lv.addWidget(self.log_box)
+        self.tabs.addTab(lw, "Log")
+        v.addWidget(self.tabs, 1)
+        return col
+
+    def make_levels_card(self):
+        card, cv = panel("Levels · whole AAF played together")
+        g = QGridLayout()
+        g.setHorizontalSpacing(30)
+        g.setVerticalSpacing(4)
+        for j, h in enumerate(["AVERAGE", "MIN", "MAX"], 1):
+            lb = QLabel(h)
+            lb.setObjectName("RowHead")
+            g.addWidget(lb, 0, j)
+        self.lv = {}
+        for i, unit in enumerate(["dBFS", "LUFS"], 1):
+            lb = QLabel(unit)
+            lb.setObjectName("RowHead")
+            g.addWidget(lb, i, 0, Qt.AlignmentFlag.AlignTop)
+            for j in range(1, 4):
+                box = QVBoxLayout()
+                box.setSpacing(0)
+                big = QLabel("–")
+                big.setObjectName("Big")
+                small = QLabel(" ")
+                small.setObjectName("Small")
+                box.addWidget(big)
+                box.addWidget(small)
+                g.addLayout(box, i, j)
+                self.lv[(unit, j)] = (big, small)
+        g.setColumnStretch(1, 1)
+        g.setColumnStretch(2, 1)
+        g.setColumnStretch(3, 1)
+        cv.addLayout(g)
+        return card
+
+    def show_levels(self, r):
+        f = levels.fmt
+        if not r:
+            for big, small in self.lv.values():
+                big.setText("–")
+                small.setText(" ")
+                big.setStyleSheet("")
+            return
+        vals = {
+            ("dBFS", 1): (f(r["rms_avg"]), "RMS, silence excluded"),
+            ("dBFS", 2): (f(r["rms_min"]), "quietest 3 s (RMS)"),
+            ("dBFS", 3): (f(r["peak"]), f"sample peak · true peak {f(r['true_peak'])}"),
+            ("LUFS", 1): (f(r.get("integrated")), "integrated"),
+            ("LUFS", 2): (f(r.get("short_min")), "short-term min"),
+            ("LUFS", 3): (f(r.get("short_max")), f"short-term max · momentary {f(r.get('momentary_max'))}"),
+        }
+        for k, (big, small) in vals.items():
+            self.lv[k][0].setText(big)
+            self.lv[k][1].setText(small)
+        self.lv[("dBFS", 3)][0].setStyleSheet(f"color: {WARN};" if r["true_peak"] > -1.0 else "")
+
+    # ================================================================ right
+    def build_right(self):
+        col = QWidget()
+        col.setFixedWidth(340)
+        v = QVBoxLayout(col)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(14)
+
+        p, pv = panel("Clean up")
+        self.cb_exact = self.combo(["Delete", "Mute", "Leave as is"], "exact_action", 0)
+        self.cb_near = self.combo(["Delete", "Mute", "Leave as is"], "near_action", 1)
+        self.cb_dm = self.combo(["Make mono, delete right channel", "Make mono, mute right channel",
+                                 "Leave as is"], "dm_action", 0)
+        self.cb_mute = self.combo(["Move to a muted “MUTE” track", "Clip gain to −144 dB",
+                                   "Disable clip (Media Composer)"], "mute_method", 0)
+        pv.addLayout(field("Duplicates", self.cb_exact))
+        pv.addLayout(field("Near-identical", self.cb_near))
+        pv.addLayout(field("Dual mono", self.cb_dm))
+        pv.addLayout(field("Mute by", self.cb_mute))
+        self.lb_notes = QLabel()
+        self.lb_notes.setObjectName("Warn")
+        self.lb_notes.setWordWrap(True)
+        pv.addWidget(self.lb_notes)
+        v.addWidget(p)
+
+        p, pv = panel("Tracks")
+        self.ck_rename = self.check("Rename tracks by content", "rename", True)
+        self.ck_dm = self.check("Rename tracks DM for dual mono", "dm_tag", True)
+        pv.addWidget(self.ck_rename)
+        pv.addWidget(self.ck_dm)
+        lb = QLabel("Extra categories")
+        lb.setObjectName("Small")
+        pv.addWidget(lb)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(6)
+        saved = set((self.settings.value("extra_cats", "") or "").split("|")) - {""}
+        self.cat_checks = {}
+        for i, label in enumerate(classify.OPTIONAL):
+            ck = QCheckBox(label)
+            ck.setToolTip(classify.OPTIONAL_HELP[label])
+            ck.setChecked(label in saved)
+            ck.toggled.connect(self.refresh_tracks)
+            self.cat_checks[label] = ck
+            grid.addWidget(ck, i // 2, i % 2)
+        pv.addLayout(grid)
+        self.t_tracks = QTableWidget(0, 2)
+        self.t_tracks.setHorizontalHeaderLabels(["TRACK", "NEW NAME"])
+        table_style(self.t_tracks)
+        self.t_tracks.setColumnWidth(0, 130)
+        self.t_tracks.itemChanged.connect(self.track_name_edited)
+        self.t_tracks.setMinimumHeight(140)
+        pv.addWidget(self.t_tracks, 1)
+        v.addWidget(p, 1)
+
+        p, pv = panel("Export")
+        self.ck_embed = self.check("Self-contained AAF (embed all audio)", "embed", False)
+        self.ck_embed.setToolTip("Every audio file is copied into a single AAF")
+        pv.addWidget(self.ck_embed)
+        foot = QLabel("The original AAF is never modified.")
+        foot.setObjectName("Small")
+        pv.addWidget(foot)
+        v.addWidget(p)
+
+        self.b_export = QPushButton("EXPORT AAF")
+        self.b_export.setObjectName("Primary")
+        self.b_export.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.b_export.setEnabled(False)
+        self.b_export.clicked.connect(self.export)
+        v.addWidget(self.b_export)
+        return col
+
+    # ================================================================ helpers
     def db_spin(self, key, tip):
         sp = QDoubleSpinBox()
         sp.setRange(-140, -10)
@@ -384,7 +587,6 @@ class Main(QMainWindow):
         sp.setValue(float(self.settings.value(key, -60)))
         sp.setSuffix(" dB")
         sp.setToolTip(tip)
-        sp.setMinimumWidth(90)
         return sp
 
     def combo(self, items, key, default):
@@ -403,143 +605,6 @@ class Main(QMainWindow):
         ck.toggled.connect(lambda on, k=key: self.settings.setValue(k, "true" if on else "false"))
         return ck
 
-    def make_levels_card(self):
-        card = QFrame()
-        card.setObjectName("Card")
-        g = QGridLayout(card)
-        g.setContentsMargins(16, 10, 16, 10)
-        g.setHorizontalSpacing(28)
-        g.setVerticalSpacing(2)
-        title = QLabel("Levels")
-        title.setObjectName("Section")
-        g.addWidget(title, 0, 0)
-        for j, h in enumerate(["Average", "Min", "Max"], 1):
-            lb = QLabel(h)
-            lb.setObjectName("RowHead")
-            g.addWidget(lb, 0, j)
-        self.lv = {}
-        for i, unit in enumerate(["dBFS", "LUFS"], 1):
-            lb = QLabel(unit)
-            lb.setObjectName("RowHead")
-            g.addWidget(lb, i, 0)
-            for j in range(1, 4):
-                box = QVBoxLayout()
-                box.setSpacing(0)
-                big = QLabel("–")
-                big.setObjectName("Big")
-                small = QLabel("")
-                small.setObjectName("Small")
-                box.addWidget(big)
-                box.addWidget(small)
-                g.addLayout(box, i, j)
-                self.lv[(unit, j)] = (big, small)
-        g.setColumnStretch(4, 1)
-        card.setVisible(False)
-        self.levels_card = card
-        return card
-
-    def show_levels(self, r):
-        if not r:
-            self.levels_card.setVisible(False)
-            return
-        f = levels.fmt
-        vals = {
-            ("dBFS", 1): (f(r["rms_avg"]), "RMS, silence excluded"),
-            ("dBFS", 2): (f(r["rms_min"]), "quietest 3 s (RMS)"),
-            ("dBFS", 3): (f(r["peak"]), f"sample peak · true peak {f(r['true_peak'])}"),
-            ("LUFS", 1): (f(r.get("integrated")), "integrated"),
-            ("LUFS", 2): (f(r.get("short_min")), "short-term min"),
-            ("LUFS", 3): (f(r.get("short_max")), f"short-term max · momentary {f(r.get('momentary_max'))}"),
-        }
-        for k, (big, small) in vals.items():
-            self.lv[k][0].setText(big)
-            self.lv[k][1].setText(small)
-        hot = r["true_peak"] > -1.0
-        self.lv[("dBFS", 3)][0].setStyleSheet("color: #D9822B;" if hot else "")
-        self.levels_card.setToolTip(f"{r['clips']} clips, {r['duration'] / 60:.1f} min at {r['sample_rate']} Hz. "
-                                    "Muted clips/tracks skipped, clip gain and fades applied, mono centred (-3 dB).")
-        self.levels_card.setVisible(True)
-
-    def make_tracks_page(self):
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(10, 10, 10, 6)
-        hint = QLabel("Content detected by Google's YAMNet model. Base categories: Dialogue, Music, FX, Others. "
-                      "Tick extra categories to split them out. New names can be edited.")
-        hint.setObjectName("Muted")
-        hint.setWordWrap(True)
-        v.addWidget(hint)
-        row = QHBoxLayout()
-        row.setSpacing(14)
-        saved = set((self.settings.value("extra_cats", "") or "").split("|")) - {""}
-        self.cat_checks = {}
-        for label in classify.OPTIONAL:
-            ck = QCheckBox(label)
-            ck.setToolTip(classify.OPTIONAL_HELP[label])
-            ck.setChecked(label in saved)
-            ck.toggled.connect(self.refresh_tracks)
-            self.cat_checks[label] = ck
-            row.addWidget(ck)
-        row.addStretch(1)
-        v.addLayout(row)
-        self.t_tracks = QTableWidget(0, 3)
-        self.t_tracks.setHorizontalHeaderLabels(["Track", "Content", "New name"])
-        self.t_tracks.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.t_tracks.horizontalHeader().setStretchLastSection(True)
-        self.t_tracks.setColumnWidth(0, 200)
-        self.t_tracks.setColumnWidth(1, 420)
-        self.t_tracks.setShowGrid(False)
-        self.t_tracks.verticalHeader().setVisible(False)
-        self.t_tracks.verticalHeader().setDefaultSectionSize(28)
-        self.t_tracks.setAlternatingRowColors(True)
-        self.t_tracks.itemChanged.connect(self.track_name_edited)
-        self.edited_names = {}
-        self.comp = None
-        v.addWidget(self.t_tracks)
-        return w
-
-    def enabled_cats(self):
-        return [k for k, ck in self.cat_checks.items() if ck.isChecked()]
-
-    def refresh_tracks(self, *_):
-        self.settings.setValue("extra_cats", "|".join(self.enabled_cats()))
-        self._filling = True
-        self.t_tracks.setRowCount(0)
-        if self.comp is None:
-            self._filling = False
-            return
-        cats = classify.track_categories(self.comp.tracks, self.enabled_cats())
-        names = classify.proposed_names(cats)
-        for (t, shares), name in zip(cats, names):
-            i = self.t_tracks.rowCount()
-            self.t_tracks.insertRow(i)
-            a = QTableWidgetItem(t.name)
-            a.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            content = "  ·  ".join(f"{k} {round(v * 100)}%" for k, v in list(shares.items())[:3] if v >= 0.05)
-            b = QTableWidgetItem(content or "no content detected")
-            b.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            if not content:
-                b.setForeground(QColor(140, 140, 140))
-            c = QTableWidgetItem(self.edited_names.get(t.index, name))
-            c.setData(Qt.ItemDataRole.UserRole, t.index)
-            c.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsSelectable)
-            self.t_tracks.setItem(i, 0, a)
-            self.t_tracks.setItem(i, 1, b)
-            self.t_tracks.setItem(i, 2, c)
-        self._filling = False
-
-    def track_name_edited(self, item):
-        if getattr(self, "_filling", False) or item.column() != 2:
-            return
-        self.edited_names[item.data(Qt.ItemDataRole.UserRole)] = item.text()
-
-    def track_names(self):
-        out = {}
-        for i in range(self.t_tracks.rowCount()):
-            it = self.t_tracks.item(i, 2)
-            out[it.data(Qt.ItemDataRole.UserRole)] = it.text()
-        return out
-
     def update_notes(self):
         notes = []
         mutes = 1 in (self.cb_exact.currentIndex(), self.cb_near.currentIndex()) or self.cb_dm.currentIndex() == 1
@@ -548,8 +613,56 @@ class Main(QMainWindow):
         if self.cb_dm.currentIndex() != 2:
             notes.append("Dual-mono clips moved to a new %s track lose their fades."
                          % ("DM" if self.ck_dm.isChecked() else "MONO"))
-        self.lb_notes.setText("⚠  " + "  ".join(notes) if notes else "")
+        self.lb_notes.setText("\n".join("⚠  " + n for n in notes))
         self.lb_notes.setVisible(bool(notes))
+
+    # ---------- content / track names ----------
+    def enabled_cats(self):
+        return [k for k, ck in self.cat_checks.items() if ck.isChecked()]
+
+    def refresh_tracks(self, *_):
+        self.settings.setValue("extra_cats", "|".join(self.enabled_cats()))
+        self._filling = True
+        self.t_tracks.setRowCount(0)
+        self.t_content.setRowCount(0)
+        if self.comp is None:
+            self._filling = False
+            return
+        cats = classify.track_categories(self.comp.tracks, self.enabled_cats())
+        names = classify.proposed_names(cats)
+        for (t, shares), name in zip(cats, names):
+            content = "  ·  ".join(f"{k} {round(v * 100)}%" for k, v in list(shares.items())[:3] if v >= 0.05)
+            i = self.t_content.rowCount()
+            self.t_content.insertRow(i)
+            self.t_content.setItem(i, 0, QTableWidgetItem(t.name))
+            b = QTableWidgetItem(content or "no content detected")
+            if not content:
+                b.setForeground(QColor(GREY))
+            self.t_content.setItem(i, 1, b)
+
+            i = self.t_tracks.rowCount()
+            self.t_tracks.insertRow(i)
+            a = QTableWidgetItem(t.name)
+            a.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            a.setForeground(QColor(GREY))
+            c = QTableWidgetItem(self.edited_names.get(t.index, name))
+            c.setData(Qt.ItemDataRole.UserRole, t.index)
+            c.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsSelectable)
+            self.t_tracks.setItem(i, 0, a)
+            self.t_tracks.setItem(i, 1, c)
+        self._filling = False
+
+    def track_name_edited(self, item):
+        if self._filling or item.column() != 1:
+            return
+        self.edited_names[item.data(Qt.ItemDataRole.UserRole)] = item.text()
+
+    def track_names(self):
+        out = {}
+        for i in range(self.t_tracks.rowCount()):
+            it = self.t_tracks.item(i, 1)
+            out[it.data(Qt.ItemDataRole.UserRole)] = it.text()
+        return out
 
     # ---------- drag & drop ----------
     def dragEnterEvent(self, e):
@@ -604,11 +717,13 @@ class Main(QMainWindow):
         self.comp = None
         self.refresh_tracks()
         self.show_levels(None)
+        for n in self.stats.values():
+            n.setText("–")
         self.cb_comp.clear()
         self.cb_comp.addItems(names)
         self.cb_comp.setVisible(len(names) > 1)
         self.drop.title.setText(os.path.basename(path))
-        self.drop.sub.setText(names[0] + "  ·  click or drop to change")
+        self.drop.sub.setText(names[0])
         self.analyze()
 
     def media_dirs(self):
@@ -636,7 +751,7 @@ class Main(QMainWindow):
         dup_db, dm_db = self.sp_dup.value(), self.sp_dm.value()
         self.comp_index = max(0, self.cb_comp.currentIndex())
         ci = self.comp_index
-        listen = self.ck_rename.isChecked()
+        listen = self.ck_listen.isChecked()
         measure = self.ck_levels.isChecked()
 
         def job(w):
@@ -645,7 +760,7 @@ class Main(QMainWindow):
                 pool = media.MediaPool(f, path, dirs, log=w.logline.emit)
                 w.progress.emit(0.0, "Reading audio…")
                 res = analysis.analyze(comp, pool, dup_db, dm_db,
-                                       progress=lambda x, m: w.progress.emit(x * (0.5 if listen else 1), m),
+                                       progress=lambda x, m: w.progress.emit(x * 0.5, m),
                                        stop=lambda: w.cancel)
                 if listen:
                     classify.classify_composition(list(comp.all_clips()), pool,
@@ -662,7 +777,7 @@ class Main(QMainWindow):
         self.log_box.clear()
         self.log(f"Analyzing {os.path.basename(path)}")
         self.run(job, self.analysis_done)
-        self.b_analyze.setText("Cancel")
+        self.b_analyze.setText("CANCEL")
 
     def make_rows(self, comp, res):
         def base(c):
@@ -688,8 +803,8 @@ class Main(QMainWindow):
         self.comp = comp
         self.edited_names = {}
         self.refresh_tracks()
-        self.show_levels(getattr(comp, "levels", None))
         lv = getattr(comp, "levels", None)
+        self.show_levels(lv)
         if lv:
             f = levels.fmt
             self.log(f"Levels: {f(lv.get('integrated'))} LUFS integrated, short-term {f(lv.get('short_min'))} to "
@@ -699,6 +814,10 @@ class Main(QMainWindow):
         self.t_exact.fill(ex)
         self.t_near.fill(nr)
         self.t_dm.fill(dm)
+        self.stats["exact"].setText(str(len(ex)))
+        self.stats["near"].setText(str(len(nr)))
+        self.stats["dm"].setText(str(len(dm)))
+        self.stats["clips"].setText(str(res.n_clips))
         self.tabs.setTabText(0, f"Duplicates  {len(ex)}")
         self.tabs.setTabText(1, f"Near-identical  {len(nr)}")
         self.tabs.setTabText(2, f"Dual mono  {len(dm)}")
@@ -713,9 +832,9 @@ class Main(QMainWindow):
             for w in res.warnings:
                 self.log("  • " + w)
             self.log("\nIf audio files are missing, set the “Audio files folder” and analyze again.")
-        msg = f"Done: {len(ex)} duplicates, {len(nr)} near-identical, {len(dm)} dual mono."
+        msg = f"Done. {len(comp.tracks)} tracks, {res.n_clips} clips."
         if n_warn:
-            msg += f"  {n_warn} clip(s) could not be analyzed, see Log."
+            msg += f"  ⚠ {n_warn} clip(s) could not be analyzed, see Log."
         self.status.setText(msg)
         self.progress.setValue(1000)
 
@@ -772,16 +891,16 @@ class Main(QMainWindow):
         self.progress.setValue(0)
         w = Worker(fn)
         w.progress.connect(lambda x, m: (self.progress.setValue(int(x * 1000)),
-                                         self.status.setText(m[:100] if m else self.status.text())))
+                                         self.status.setText(m[:80] if m else self.status.text())))
         w.logline.connect(self.log)
 
         def finish(res):
-            self.b_analyze.setText("Analyze")
+            self.b_analyze.setText("ANALYZE")
             on_done(res)
             self.busy(False)
 
         def fail(msg):
-            self.b_analyze.setText("Analyze")
+            self.b_analyze.setText("ANALYZE")
             self.busy(False)
             self.status.setText("Error.")
             self.log(msg)
@@ -793,15 +912,20 @@ class Main(QMainWindow):
         w.start()
 
 
-def main():
-    app = QApplication(sys.argv)
+def setup_app(app):
     app.setApplicationName(APP)
     if "Fusion" in QStyleFactory.keys():
         app.setStyle("Fusion")
+    app.setPalette(dark_palette())
     app.setStyleSheet(STYLE)
     icon = resource("icon.png")
     if os.path.exists(icon):
         app.setWindowIcon(QIcon(icon))
+
+
+def main():
+    app = QApplication(sys.argv)
+    setup_app(app)
     win = Main()
     win.show()
     if len(sys.argv) > 1 and sys.argv[1].lower().endswith(".aaf"):
