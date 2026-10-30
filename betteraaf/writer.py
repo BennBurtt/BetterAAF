@@ -133,7 +133,7 @@ class Editor:
         cur = 0
         for pos, comp in sorted(items, key=lambda x: x[0]):
             if pos < cur:
-                self.log("Attention : chevauchement ignoré sur une nouvelle piste")
+                self.log("Warning: overlap ignored on a new track")
                 continue
             if pos > cur:
                 seq.components.append(self.filler(pos - cur))
@@ -253,7 +253,7 @@ class Editor:
                     pos_in_vec += 1
                 mob.slots.insert(pos_in_vec, slot)
                 order.append(("new", slot))
-                self.log(f"Nouvelle piste : {name}" + (" (mutée)" if "MUTE" in suffix else ""))
+                self.log(f"New track: {name}" + (" (muted)" if "MUTE" in suffix else ""))
         n = 1
         for kind, x in order:
             slot = x.slot if kind == "old" else x
@@ -299,7 +299,7 @@ def embed_media(f, comp_mob, src_aaf_path, media_dirs, log, progress=None):
         except Exception:
             bits = 24
         if progress:
-            progress(i / max(1, len(ids)), "Embarque " + (mob.name or ""))
+            progress(i / max(1, len(ids)), "Embedding " + (mob.name or ""))
         old = mob.descriptor
         old_rate = model.prop(old, "SampleRate", src.sr)
         d = f.create.PCMDescriptor()
@@ -329,11 +329,11 @@ def embed_media(f, comp_mob, src_aaf_path, media_dirs, log, progress=None):
         done += 1
     pool.close()
     if missing:
-        log("Médias introuvables, laissés en lien externe : " + ", ".join(missing[:20])
+        log("Media not found, left as external links: " + ", ".join(missing[:20])
             + (" ..." if len(missing) > 20 else ""))
-    log(f"{done} fichier(s) son embarqué(s) dans l'AAF ({total_bytes / 1e6:.0f} Mo)")
+    log(f"{done} audio file(s) embedded in the AAF ({total_bytes / 1e6:.0f} MB)")
     if total_bytes > 2e9:
-        log("Attention : l'AAF dépasse 2 Go, certaines versions de Pro Tools refusent les AAF embarqués aussi lourds.")
+        log("Warning: the AAF is larger than 2 GB, some Pro Tools versions refuse embedded AAFs this large.")
     return done, missing
 
 
@@ -342,7 +342,7 @@ def export(src_path, dst_path, comp_index, results, plan, log=print, progress=No
     """Applique le plan sur une copie de l'AAF. results = analyse faite sur l'original
     (les uid sont identiques car la lecture est déterministe)."""
     if src_path == dst_path:
-        raise ValueError("Le fichier de sortie doit être différent de l'original.")
+        raise ValueError("The output file must be different from the original.")
     shutil.copyfile(src_path, dst_path)
     stats = dict(deleted=0, muted=0, mono=0, new_tracks=0, skipped=0)
     with aaf2.open(dst_path, "rw") as f:
@@ -433,7 +433,7 @@ def export(src_path, dst_path, comp_index, results, plan, log=print, progress=No
                             ed.add_to_new_track(t, "R MUTE", c.position, r)
                         ed.replace(c, mono)
                     rebuilt[tindex] = True
-                    log(f"Piste « {t.name} » convertie en mono ({len(conv)} clips)")
+                    log(f"Track \"{t.name}\" converted to mono ({len(conv)} clips)")
                 else:
                     # au moins un clip réellement stéréo : les clips double mono
                     # partent sur une nouvelle piste mono
@@ -445,8 +445,8 @@ def export(src_path, dst_path, comp_index, results, plan, log=print, progress=No
                                 r = ed.muted(r, plan.mute_method)
                             ed.add_to_new_track(t, "MONO R MUTE", c.position, r)
                         ed.blank(c)
-                    log(f"Piste « {t.name} » : {len(conv)} clips double mono déplacés sur « {t.name} MONO » "
-                        f"({len(others)} clips stéréo conservés)")
+                    log(f"Track \"{t.name}\": {len(conv)} dual-mono clips moved to \"{t.name} MONO\" "
+                        f"({len(others)} stereo clips kept)")
                 stats["mono"] += len(conv)
 
         stats["new_tracks"] = len(ed.new_tracks)

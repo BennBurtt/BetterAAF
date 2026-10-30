@@ -1,35 +1,35 @@
 # BetterAAF
 
-Nettoyage d'AAF avant le mixage : clips dupliqués, clips quasi identiques (null test) et clips stéréo qui sont en fait du double mono.
+Cleans up an AAF before the mix: duplicate clips, near-identical clips (null test) and stereo clips that are actually dual mono.
 
-## Utilisation
+## How to use
 
-1. Glisse un `.aaf` dans la fenêtre (ou **Ouvrir un AAF…**). L'analyse démarre toute seule.
-2. Si des fichiers son ont été déplacés, indique leur dossier dans **Fichiers son** (ou glisse le dossier dans la fenêtre) puis **Analyser**.
-3. Coche ou décoche les clips dans chaque onglet, choisis les actions, puis **Exporter l'AAF corrigé…**.
-   L'AAF d'origine n'est jamais modifié.
+1. Drop an `.aaf` on the window (or click the drop zone). Analysis starts on its own.
+2. If audio files have moved, set **Audio files folder** (or drop the folder on the window) and analyze again.
+3. Tick or untick clips in each tab, pick the actions, then **Export AAF…**. The original AAF is never modified.
 
-## Ce qui est détecté
+## What it finds
 
-- **Clips dupliqués** : un clip entièrement recouvert, sur une autre piste, par un clip au même audio
-  (même média au même calage, ou audio identique à l'échantillon près). On garde la piste la plus haute.
-- **Quasi identiques** : même chose, mais le null test donne un résidu sous le seuil (−60 dB par défaut,
-  résidu rapporté au plus fort des deux clips).
-- **Stéréo double mono** : L − R sous le seuil. Gère les pistes stéréo exportées en multicanal
-  (Channel Combiner) et les paires de pistes mono `Piste.L` / `Piste.R`.
+- **Duplicates**: a clip fully covered, on another track, by a clip with the same audio. The higher track is kept.
+- **Near-identical**: same, but the null test leaves a residual below the threshold (−60 dB by default).
+- **Dual mono**: L − R below the threshold. Works with multichannel (Channel Combiner) stereo tracks,
+  including DaVinci Resolve exports, and with `Track.L` / `Track.R` mono track pairs.
 
 ## Actions
 
-- Supprimer ou muter les doublons. Trois façons de muter : clip désactivé (mute natif Media Composer),
-  gain de clip à −∞, ou déplacement sur une piste « MUTE ».
-- Double mono : passage en mono en supprimant ou en mutant le canal R.
-  Si une piste stéréo contient au moins un vrai clip stéréo, les clips double mono partent sur une
-  nouvelle piste « … MONO » ; si toute la piste est double mono, elle devient mono.
-- **AAF autonome** : tous les fichiers son utilisés sont embarqués dans un seul fichier AAF.
+- Delete or mute duplicates. Mute by moving to a muted “MUTE” track (default), clip gain at −144 dB,
+  or Media Composer style disabled clip.
+- Dual mono: make mono, deleting or muting the right channel. A stereo track that also holds true stereo
+  clips keeps them, and its dual-mono clips move to a new “… MONO” track.
+- **Self-contained AAF**: every audio file is embedded in one AAF.
 
-## Limites connues
+## Known limits
 
-- Les fondus et transitions ne sont pas pris en compte dans le null test ; le gain de clip non plus.
-- Les médias MXF (Media Composer) nécessitent ffmpeg installé sur le Mac (`brew install ffmpeg`).
-  Les WAV / BWF / AIFF de Pro Tools sont lus directement.
-- Un clip stéréo pointant vers un seul fichier entrelacé est analysé mais ne peut pas être converti en mono.
+- Clips moved to a new track (MUTE or MONO) lose their fades.
+- Fades and clip gain are not taken into account by the null test.
+- MXF media (Media Composer) needs ffmpeg installed (`brew install ffmpeg`). WAV / BWF / AIFF are read directly.
+
+## Development
+
+`tests/make_test_aaf.py` builds a test AAF covering every case, `tests/check_aaf.py` runs a strict
+consistency check (Pro Tools oriented). Every push builds the Mac app on GitHub and publishes it under Releases.

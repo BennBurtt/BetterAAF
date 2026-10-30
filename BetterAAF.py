@@ -2,7 +2,7 @@ import sys
 
 
 def selftest(path):
-    """Analyse + export sans interface (utilisé pour vérifier l'appli compilée)."""
+    """Headless analysis + export, used to check the built app."""
     import aaf2
     from betteraaf import model, media, analysis, writer
     with aaf2.open(path, "r") as f:
@@ -10,7 +10,7 @@ def selftest(path):
         pool = media.MediaPool(f, path)
         r = analysis.analyze(comp, pool)
     print("exact", len(r.exact), "near", len(r.near), "dualmono", len(r.dualmono), "warnings", r.warnings)
-    assert (len(r.exact), len(r.near), len(r.dualmono)) == (2, 2, 4), "résultats inattendus"
+    assert (len(r.exact), len(r.near), len(r.dualmono)) == (2, 2, 4), "unexpected results"
     plan = writer.Plan(exact_uids=[x.clip.uid for x in r.exact], near_uids=[x.clip.uid for x in r.near],
                        dm_uids=[x.clip.uid for x in r.dualmono])
     out = path[:-4] + "_selftest.aaf"

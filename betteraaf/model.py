@@ -150,11 +150,11 @@ def resolve_sourceclip(sc, rate_from):
     master_id, master_slot = "", 0
     for _ in range(12):
         if mob is None:
-            raise Unresolved("média absent de l'AAF (mob introuvable)")
+            raise Unresolved("media missing from the AAF (mob not found)")
         try:
             slot = mob.slot_at(slot_id)
         except Exception:
-            raise Unresolved("piste de média introuvable")
+            raise Unresolved("media track not found")
         srate = frac(slot.edit_rate)
         start_s = start * srate / rate
         if isinstance(mob, MasterMob) and not master_id:
@@ -180,12 +180,12 @@ def resolve_sourceclip(sc, rate_from):
                     if p <= start_s < p + c.length:
                         break
             if comp is None:
-                raise Unresolved("séquence de média vide")
+                raise Unresolved("empty media sequence")
         if not isinstance(comp, SourceClip):
-            raise Unresolved("média non relié (%s)" % type(comp).__name__)
+            raise Unresolved("media not linked (%s)" % type(comp).__name__)
         start = Fraction(comp.start or 0) + (start_s - comp_pos)
         mob, slot_id, rate = comp.mob, comp.slot_id, srate
-    raise Unresolved("chaîne de média trop profonde")
+    raise Unresolved("media chain too deep")
 
 
 def is_combiner(og):
@@ -272,13 +272,13 @@ def build_clip(uid, track, index, pos, comp):
             for s in inner.segments:
                 sc, _w = unwrap(s)
                 if not isinstance(sc, SourceClip):
-                    raise Unresolved("entrée de combiner non supportée")
+                    raise Unresolved("unsupported channel combiner input")
                 names.append(clip_name(sc))
                 clip.channels.append(resolve_sourceclip(sc, track.edit_rate))
             clip.name = names[0] if names else "(combiner)"
         else:
             clip.name = type(inner).__name__
-            clip.error = "type de clip non supporté (%s)" % type(inner).__name__
+            clip.error = "unsupported clip type (%s)" % type(inner).__name__
     except Unresolved as e:
         clip.error = str(e)
         if not clip.name:

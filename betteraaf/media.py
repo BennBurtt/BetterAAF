@@ -127,7 +127,7 @@ def decode_pcm(raw, bits, big=False, is_float=False):
         return v.astype(np.float32) / float(1 << 23)
     if bits == 32:
         return np.frombuffer(raw, dtype=e + "i4").astype(np.float32) / 2147483648.0
-    raise ValueError("résolution non supportée : %d bits" % bits)
+    raise ValueError("unsupported bit depth: %d bits" % bits)
 
 
 def parse_wave_summary(summary):
@@ -217,7 +217,7 @@ class MediaPool:
             src = None
             self.errors[mob_id] = str(e)
         if src is None and mob_id not in self.errors:
-            self.errors[mob_id] = "média introuvable"
+            self.errors[mob_id] = "media not found"
         self.sources[mob_id] = src
         return src
 
@@ -228,14 +228,14 @@ class MediaPool:
                 mob = m
                 break
         if mob is None:
-            raise IOError("mob fichier absent")
+            raise IOError("file mob missing")
         d = mob.descriptor
         ess = self.f.content.essencedata.get(mob.mob_id, None)
         if ess is not None:
             return self._embedded(d, ess)
         path = self.locate(mob)
         if not path:
-            raise IOError("fichier média introuvable (%s)" % (mob.name or mob_id))
+            raise IOError("media file not found (%s)" % (mob.name or mob_id))
         self.paths[mob_id] = path
         try:
             return SoundFileSource(path)
@@ -257,7 +257,7 @@ class MediaPool:
 
     def _ffmpeg(self, path):
         if not self.ffmpeg:
-            raise IOError("format non lisible sans ffmpeg (%s)" % os.path.basename(path))
+            raise IOError("format needs ffmpeg to be read (%s)" % os.path.basename(path))
         probe = subprocess.run([self.ffmpeg, "-hide_banner", "-i", path], capture_output=True, text=True)
         import re
         m = re.search(r"Audio:.*?(\d+) Hz, ([^,]+),", probe.stderr)
@@ -273,7 +273,7 @@ class MediaPool:
         r = subprocess.run([self.ffmpeg, "-v", "error", "-y", "-i", path, "-map", "0:a:0",
                             "-f", "f32le", "-acodec", "pcm_f32le", tmp], capture_output=True)
         if r.returncode != 0:
-            raise IOError("ffmpeg n'a pas pu décoder %s" % os.path.basename(path))
+            raise IOError("ffmpeg could not decode %s" % os.path.basename(path))
         size = os.path.getsize(tmp)
         return RawSource(lambda: open(tmp, "rb"), nch, sr, 32, False, True, size // (4 * nch))
 
@@ -303,5 +303,5 @@ class MediaPool:
         """n échantillons du canal, à partir de offset (relatif au début du clip)."""
         src = self.prepare(ch)
         if src is None:
-            raise IOError(self.errors.get(ch.mob_id, "média illisible"))
+            raise IOError(self.errors.get(ch.mob_id, "unreadable media"))
         return src.read(ch.sample_offset + offset, n)[:, ch.channel]

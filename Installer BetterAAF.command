@@ -8,7 +8,8 @@ echo "=== Installation de BetterAAF (5 minutes environ, une seule fois) ==="
 echo ""
 mkdir -p "$WORK"
 rm -rf "$WORK/betteraaf"
-cp -R "$SRC/betteraaf" "$SRC/BetterAAF.py" "$SRC/requirements.txt" "$WORK/"
+rm -rf "$WORK/assets"
+cp -R "$SRC/betteraaf" "$SRC/assets" "$SRC/BetterAAF.py" "$SRC/requirements.txt" "$WORK/"
 cd "$WORK"
 
 if [ ! -x "$WORK/uv" ]; then
@@ -23,7 +24,7 @@ echo "> Installation des composants…"
 
 echo "> Fabrication de l'appli…"
 .venv/bin/pyinstaller --noconfirm --windowed --log-level ERROR --name BetterAAF \
-  --osx-bundle-identifier fr.benjaminmartin.betteraaf \
+  --osx-bundle-identifier fr.benjaminmartin.betteraaf --add-data "assets:assets" \
   --collect-all soundfile --collect-all _soundfile_data --hidden-import aaf2 \
   BetterAAF.py
 

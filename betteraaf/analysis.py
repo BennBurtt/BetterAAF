@@ -87,7 +87,7 @@ def prepare_clips(comp, pool, log):
         for ch in c.channels:
             if pool.prepare(ch) is None:
                 ok = False
-                c.error = pool.errors.get(ch.mob_id, "média illisible")
+                c.error = pool.errors.get(ch.mob_id, "unreadable media")
                 break
         if not ok:
             continue
@@ -100,7 +100,7 @@ def prepare_clips(comp, pool, log):
         rates = {ch.sample_rate for ch in c.channels}
         c.sr = c.channels[0].sample_rate
         if len(rates) > 1:
-            c.error = "fréquences d'échantillonnage différentes entre canaux"
+            c.error = "channels have different sample rates"
             continue
         e = c.track.edit_rate
         c.s0 = int(round(Fraction(c.position) * c.sr / e))
@@ -174,7 +174,7 @@ def analyze(comp, pool, dup_db=-60.0, dm_db=-60.0, progress=None, stop=None, log
     total = sum(1 for _ in comp.all_clips())
     for c in comp.all_clips():
         if c.error:
-            warnings.append(f"{c.label()} : {c.error}")
+            warnings.append(f"{c.label()}: {c.error}")
     pair_split_stereo(clips)
 
     # --- candidats doublons : un clip entièrement recouvert par un autre clip
@@ -231,12 +231,12 @@ def analyze(comp, pool, dup_db=-60.0, dm_db=-60.0, progress=None, stop=None, log
         except InterruptedError:
             raise
         except Exception as e:
-            warnings.append(f"{red.label()} : lecture impossible ({e})")
+            warnings.append(f"{red.label()}: could not read audio ({e})")
             continue
         if worst <= dup_db:
             flagged.add(red.uid)
             if worst == -math.inf:
-                exact.append(Finding("exact", red, keep, worst, note="audio identique (fichiers différents)"))
+                exact.append(Finding("exact", red, keep, worst, note="identical audio (different files)"))
             else:
                 near.append(Finding("near", red, keep, worst))
 
@@ -246,10 +246,10 @@ def analyze(comp, pool, dup_db=-60.0, dm_db=-60.0, progress=None, stop=None, log
         if c.nch == 2:
             L, R, conv, note = c.channels[0], c.channels[1], c.kind == "combiner", ""
             if not conv:
-                note = "conversion non supportée pour ce format de clip"
+                note = "conversion not supported for this clip format"
             target, offR = c, 0
         elif c.side == "L":
-            L, R, conv, note = c.channels[0], c.partner.channels[0], True, "paire L/R sur 2 pistes"
+            L, R, conv, note = c.channels[0], c.partner.channels[0], True, "L/R pair on 2 tracks"
             target = c
             offR = 0
         else:
@@ -262,7 +262,7 @@ def analyze(comp, pool, dup_db=-60.0, dm_db=-60.0, progress=None, stop=None, log
         except InterruptedError:
             raise
         except Exception as e:
-            warnings.append(f"{c.label()} : lecture impossible ({e})")
+            warnings.append(f"{c.label()}: could not read audio ({e})")
             continue
         if r <= dm_db:
             dual.append(Finding("dualmono", target, c.partner, r, conv, note))
