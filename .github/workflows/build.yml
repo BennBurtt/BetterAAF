@@ -42,3 +42,24 @@ jobs:
         with:
           name: BetterAAF-${{ matrix.arch }}
           path: BetterAAF-${{ matrix.arch }}.zip
+
+  release:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+          merge-multiple: true
+      - name: Publication sur la page Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -la dl
+          TAG="v1.0-build${{ github.run_number }}"
+          gh release create "$TAG" dl/*.zip -R "${{ github.repository }}" \
+            --title "BetterAAF (build ${{ github.run_number }})" \
+            --notes "BetterAAF-AppleSilicon.zip : Mac M1/M2/M3/M4. BetterAAF-Intel.zip : Mac Intel. Dézippe, puis glisse BetterAAF.app dans Applications."
