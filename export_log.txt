@@ -1,0 +1,9 @@
+2026-10-30 23:44:18.387533: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Traceback (most recent call last):
+  File "/home/runner/work/BetterAAF/BetterAAF/tools/export_yamnet.py", line 21, in <module>
+    import yamnet as yamnet_model  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/BetterAAF/BetterAAF/tfmodels/research/audioset/yamnet/yamnet.py", line 22, in <module>
+    from tf_keras import Model, layers
+ModuleNotFoundError: No module named 'tf_keras'
