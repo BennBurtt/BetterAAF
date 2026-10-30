@@ -14,10 +14,10 @@ from PyQt6.QtWidgets import (
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
     QFrame, QCheckBox, QPlainTextEdit, QMessageBox, QAbstractItemView, QStyleFactory)
 
-from . import model, media, analysis, writer
+from . import model, media, analysis, writer, classify
 
 APP = "BetterAAF"
-VERSION = "1.2"
+VERSION = "1.3"
 ACCENT = "#8E4FD0"
 
 
@@ -188,7 +188,7 @@ class Main(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP)
-        self.resize(1120, 800)
+        self.resize(1140, 860)
         self.setMinimumSize(900, 640)
         self.setAcceptDrops(True)
         self.settings = QSettings("BenjaminMartin", APP)
@@ -282,6 +282,7 @@ class Main(QMainWindow):
                                                  "the threshold."), "Near-identical")
         self.tabs.addTab(table_page(self.t_dm, "Stereo clips whose left and right channels null out."),
                          "Dual mono")
+        self.tabs.addTab(self.make_tracks_page(), "Tracks")
         self.log_box = QPlainTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setFrameShape(QFrame.Shape.NoFrame)
@@ -318,29 +319,44 @@ class Main(QMainWindow):
         ga.addWidget(self.cb_dm, 2, 1)
         ga.addWidget(QLabel("Mute by"), 2, 2)
         ga.addWidget(self.cb_mute, 2, 3)
-        self.ck_embed = QCheckBox("Self-contained AAF (embed every audio file in one AAF)")
-        self.ck_embed.setChecked(self.settings.value("embed", "false") == "true")
-        ga.addWidget(self.ck_embed, 3, 0, 1, 3)
+        self.ck_rename = self.check("Rename tracks by content", "rename", True)
+        self.ck_dm = self.check("Rename tracks DM for dual mono", "dm_tag", True)
+        self.ck_embed = self.check("Self-contained AAF (embed all audio)", "embed", False)
+        opts = QHBoxLayout()
+        opts.setSpacing(18)
+        for ck in (self.ck_rename, self.ck_dm, self.ck_embed):
+            opts.addWidget(ck)
+        opts.addStretch(1)
+        self.ck_rename.setToolTip("Dialogue, Music, FX, Others (see the Tracks tab)")
+        self.ck_embed.setToolTip("Every audio file is copied into a single AAF")
+        ga.addLayout(opts, 3, 0, 1, 4)
+        if not classify.available():
+            self.ck_rename.setChecked(False)
+            self.ck_rename.setEnabled(False)
+            self.ck_rename.setToolTip("Content detection model not included in this build.")
         self.b_export = QPushButton("Export AAF…")
         self.b_export.setObjectName("Primary")
         self.b_export.setEnabled(False)
         self.b_export.clicked.connect(self.export)
-        ga.addWidget(self.b_export, 3, 3, Qt.AlignmentFlag.AlignRight)
+
         self.lb_notes = QLabel()
         self.lb_notes.setObjectName("Warn")
         self.lb_notes.setWordWrap(True)
-        ga.addWidget(self.lb_notes, 4, 0, 1, 4)
+        ga.addWidget(self.lb_notes, 4, 0, 1, 3)
         foot = QLabel("When a stereo track also holds true stereo clips, its dual-mono clips move to a new "
-                      "“… MONO” track. The original AAF is never modified.")
+                      "“… DM” (or “… MONO”) track. The original AAF is never modified.")
         foot.setObjectName("Muted")
         foot.setWordWrap(True)
-        ga.addWidget(foot, 5, 0, 1, 4)
+        ga.addWidget(foot, 5, 0, 1, 3)
+        ga.addWidget(self.b_export, 4, 3, 2, 1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
         ga.setColumnStretch(1, 1)
         ga.setColumnStretch(3, 1)
         v.addWidget(card)
 
         for cb in (self.cb_exact, self.cb_near, self.cb_dm, self.cb_mute):
             cb.currentIndexChanged.connect(self.update_notes)
+        self.ck_dm.toggled.connect(self.update_notes)
+        self.ck_rename.toggled.connect(lambda on: on and self.comp is not None and self.analyze())
         self.update_notes()
 
         act = QAction("Open…", self)
@@ -369,13 +385,100 @@ class Main(QMainWindow):
         cb.currentIndexChanged.connect(lambda i, k=key: self.settings.setValue(k, i))
         return cb
 
+    def check(self, text, key, default):
+        ck = QCheckBox(text)
+        ck.setChecked(self.settings.value(key, "true" if default else "false") == "true")
+        ck.toggled.connect(lambda on, k=key: self.settings.setValue(k, "true" if on else "false"))
+        return ck
+
+    def make_tracks_page(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(10, 10, 10, 6)
+        hint = QLabel("Content detected by Google's YAMNet model. Base categories: Dialogue, Music, FX, Others. "
+                      "Tick extra categories to split them out. New names can be edited.")
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        row = QHBoxLayout()
+        row.setSpacing(14)
+        saved = set((self.settings.value("extra_cats", "") or "").split("|")) - {""}
+        self.cat_checks = {}
+        for label in classify.OPTIONAL:
+            ck = QCheckBox(label)
+            ck.setToolTip(classify.OPTIONAL_HELP[label])
+            ck.setChecked(label in saved)
+            ck.toggled.connect(self.refresh_tracks)
+            self.cat_checks[label] = ck
+            row.addWidget(ck)
+        row.addStretch(1)
+        v.addLayout(row)
+        self.t_tracks = QTableWidget(0, 3)
+        self.t_tracks.setHorizontalHeaderLabels(["Track", "Content", "New name"])
+        self.t_tracks.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.t_tracks.horizontalHeader().setStretchLastSection(True)
+        self.t_tracks.setColumnWidth(0, 200)
+        self.t_tracks.setColumnWidth(1, 420)
+        self.t_tracks.setShowGrid(False)
+        self.t_tracks.verticalHeader().setVisible(False)
+        self.t_tracks.verticalHeader().setDefaultSectionSize(28)
+        self.t_tracks.setAlternatingRowColors(True)
+        self.t_tracks.itemChanged.connect(self.track_name_edited)
+        self.edited_names = {}
+        self.comp = None
+        v.addWidget(self.t_tracks)
+        return w
+
+    def enabled_cats(self):
+        return [k for k, ck in self.cat_checks.items() if ck.isChecked()]
+
+    def refresh_tracks(self, *_):
+        self.settings.setValue("extra_cats", "|".join(self.enabled_cats()))
+        self._filling = True
+        self.t_tracks.setRowCount(0)
+        if self.comp is None:
+            self._filling = False
+            return
+        cats = classify.track_categories(self.comp.tracks, self.enabled_cats())
+        names = classify.proposed_names(cats)
+        for (t, shares), name in zip(cats, names):
+            i = self.t_tracks.rowCount()
+            self.t_tracks.insertRow(i)
+            a = QTableWidgetItem(t.name)
+            a.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            content = "  ·  ".join(f"{k} {round(v * 100)}%" for k, v in list(shares.items())[:3] if v >= 0.05)
+            b = QTableWidgetItem(content or "no content detected")
+            b.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            if not content:
+                b.setForeground(QColor(140, 140, 140))
+            c = QTableWidgetItem(self.edited_names.get(t.index, name))
+            c.setData(Qt.ItemDataRole.UserRole, t.index)
+            c.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsSelectable)
+            self.t_tracks.setItem(i, 0, a)
+            self.t_tracks.setItem(i, 1, b)
+            self.t_tracks.setItem(i, 2, c)
+        self._filling = False
+
+    def track_name_edited(self, item):
+        if getattr(self, "_filling", False) or item.column() != 2:
+            return
+        self.edited_names[item.data(Qt.ItemDataRole.UserRole)] = item.text()
+
+    def track_names(self):
+        out = {}
+        for i in range(self.t_tracks.rowCount()):
+            it = self.t_tracks.item(i, 2)
+            out[it.data(Qt.ItemDataRole.UserRole)] = it.text()
+        return out
+
     def update_notes(self):
         notes = []
         mutes = 1 in (self.cb_exact.currentIndex(), self.cb_near.currentIndex()) or self.cb_dm.currentIndex() == 1
         if mutes and self.cb_mute.currentIndex() == 0:
             notes.append("Clips moved to a MUTE track lose their fades.")
         if self.cb_dm.currentIndex() != 2:
-            notes.append("Dual-mono clips moved to a new MONO track lose their fades.")
+            notes.append("Dual-mono clips moved to a new %s track lose their fades."
+                         % ("DM" if self.ck_dm.isChecked() else "MONO"))
         self.lb_notes.setText("⚠  " + "  ".join(notes) if notes else "")
         self.lb_notes.setVisible(bool(notes))
 
@@ -429,6 +532,8 @@ class Main(QMainWindow):
         self.b_export.setEnabled(False)
         for t in (self.t_exact, self.t_near, self.t_dm):
             t.setRowCount(0)
+        self.comp = None
+        self.refresh_tracks()
         self.cb_comp.clear()
         self.cb_comp.addItems(names)
         self.cb_comp.setVisible(len(names) > 1)
@@ -461,6 +566,7 @@ class Main(QMainWindow):
         dup_db, dm_db = self.sp_dup.value(), self.sp_dm.value()
         self.comp_index = max(0, self.cb_comp.currentIndex())
         ci = self.comp_index
+        listen = self.ck_rename.isChecked()
 
         def job(w):
             with aaf2.open(path, "r") as f:
@@ -468,8 +574,12 @@ class Main(QMainWindow):
                 pool = media.MediaPool(f, path, dirs, log=w.logline.emit)
                 w.progress.emit(0.0, "Reading audio…")
                 res = analysis.analyze(comp, pool, dup_db, dm_db,
-                                       progress=lambda x, m: w.progress.emit(x, m),
+                                       progress=lambda x, m: w.progress.emit(x * (0.5 if listen else 1), m),
                                        stop=lambda: w.cancel)
+                if listen:
+                    classify.classify_composition(list(comp.all_clips()), pool,
+                                                  progress=lambda x, m: w.progress.emit(0.5 + x / 2, m),
+                                                  stop=lambda: w.cancel, log=w.logline.emit)
                 pool.close()
                 return comp, res, self.make_rows(comp, res), dict(pool.paths)
 
@@ -499,6 +609,9 @@ class Main(QMainWindow):
     def analysis_done(self, out):
         comp, res, rows, paths = out
         self.results = res
+        self.comp = comp
+        self.edited_names = {}
+        self.refresh_tracks()
         ex, nr, dm = rows
         self.t_exact.fill(ex)
         self.t_near.fill(nr)
@@ -507,7 +620,7 @@ class Main(QMainWindow):
         self.tabs.setTabText(1, f"Near-identical  {len(nr)}")
         self.tabs.setTabText(2, f"Dual mono  {len(dm)}")
         n_warn = len(res.warnings)
-        self.tabs.setTabText(3, f"Log  ⚠ {n_warn}" if n_warn else "Log")
+        self.tabs.setTabText(4, f"Log  ⚠ {n_warn}" if n_warn else "Log")
         self.log(f"{res.n_clips} clips on {len(comp.tracks)} audio tracks.")
         self.log(f"{len(ex)} duplicates, {len(nr)} near-identical, {len(dm)} dual mono.")
         if paths:
@@ -543,9 +656,10 @@ class Main(QMainWindow):
             dm_action=["mono_delete", "mono_mute", "none"][self.cb_dm.currentIndex()],
             mute_method=["track", "gain", "avid"][self.cb_mute.currentIndex()],
             exact_uids=self.t_exact.checked(), near_uids=self.t_near.checked(),
-            dm_uids=self.t_dm.checked())
+            dm_uids=self.t_dm.checked(),
+            track_names=self.track_names() if self.ck_rename.isChecked() else {},
+            dm_tag=self.ck_dm.isChecked())
         embed = self.ck_embed.isChecked()
-        self.settings.setValue("embed", "true" if embed else "false")
         src, res, ci, dirs = self.aaf_path, self.results, self.comp_index, self.media_dirs()
 
         def job(w):

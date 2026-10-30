@@ -61,6 +61,7 @@ class Clip:
     sr: int = 0
     s0: int = 0                # début en échantillons (timeline)
     s1: int = 0                # fin en échantillons
+    votes: dict = None         # contenu détecté (classify.py)
 
     @property
     def nch(self):

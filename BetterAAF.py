@@ -9,6 +9,14 @@ def selftest(path):
         comp = model.read_composition(f, model.list_compositions(f)[0])
         pool = media.MediaPool(f, path)
         r = analysis.analyze(comp, pool)
+        from betteraaf import classify
+        if classify.available():
+            classify.classify_composition(list(comp.all_clips()), pool)
+            cats = classify.track_categories(comp.tracks, [])
+            print("content:", [(t.name, next(iter(c), None)) for t, c in cats])
+            assert any(c for _t, c in cats), "content detection produced nothing"
+        else:
+            print("content detection: model not present")
     print("exact", len(r.exact), "near", len(r.near), "dualmono", len(r.dualmono), "warnings", r.warnings)
     assert (len(r.exact), len(r.near), len(r.dualmono)) == (2, 2, 4), "unexpected results"
     plan = writer.Plan(exact_uids=[x.clip.uid for x in r.exact], near_uids=[x.clip.uid for x in r.near],

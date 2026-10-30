@@ -24,7 +24,7 @@ echo "> Installation des composants…"
 
 echo "> Fabrication de l'appli…"
 .venv/bin/pyinstaller --noconfirm --windowed --log-level ERROR --name BetterAAF \
-  --osx-bundle-identifier fr.benjaminmartin.betteraaf --add-data "assets:assets" \
+  --osx-bundle-identifier fr.benjaminmartin.betteraaf --add-data "assets:assets" --add-data "betteraaf/models:betteraaf/models" \
   --collect-all soundfile --collect-all _soundfile_data --hidden-import aaf2 \
   BetterAAF.py
 

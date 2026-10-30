@@ -24,10 +24,13 @@ class Plan:
     *_uids : clips cochés (uid du modèle)."""
 
     def __init__(self, dup_action="delete", near_action="mute", dm_action="mono_delete",
-                 mute_method="track", exact_uids=(), near_uids=(), dm_uids=()):
+                 mute_method="track", exact_uids=(), near_uids=(), dm_uids=(),
+                 track_names=None, dm_tag=True):
         self.dup_action, self.near_action, self.dm_action = dup_action, near_action, dm_action
         self.mute_method = mute_method
         self.exact_uids, self.near_uids, self.dm_uids = set(exact_uids), set(near_uids), set(dm_uids)
+        self.track_names = dict(track_names or {})   # index de piste -> nouveau nom
+        self.dm_tag = dm_tag                          # pistes double mono converties : suffixe " DM"
 
 
 class Editor:
@@ -232,7 +235,7 @@ class Editor:
 
         order = []  # pistes son dans l'ordre d'affichage (PhysicalTrackNumber)
         new_ids = set()
-        suffix_rank = {"MONO": 0, "MONO R MUTE": 1, "R MUTE": 2, "MUTE": 3}
+        suffix_rank = {"MONO": 0, "DM": 0, "MONO R MUTE": 1, "DM R MUTE": 1, "R MUTE": 2, "MUTE": 3}
         for t in sorted(self.comp.tracks, key=lambda t: (t.phys or 0, t.index)):
             order.append(("old", t))
             mine = [(s, items) for (ti, s), items in self.new_tracks.items() if ti == t.index]
@@ -350,6 +353,13 @@ def export(src_path, dst_path, comp_index, results, plan, log=print, progress=No
         comp = model.read_composition(f, mob, normalize=True)
         clips = {c.uid: c for c in comp.all_clips()}
         ed = Editor(f, comp, log)
+        for t in comp.tracks:
+            new = (plan.track_names.get(t.index) or "").strip()
+            if new and new != t.name:
+                log(f"Track \"{t.name}\" renamed \"{new}\"")
+                t.name = new
+                t.slot.name = new
+        mono_suffix = "DM" if plan.dm_tag else "MONO"
 
         def live(c):
             return clips.get(c.uid)
@@ -434,18 +444,21 @@ def export(src_path, dst_path, comp_index, results, plan, log=print, progress=No
                         ed.replace(c, mono)
                     rebuilt[tindex] = True
                     log(f"Track \"{t.name}\" converted to mono ({len(conv)} clips)")
+                    if plan.dm_tag:
+                        t.name = t.name + " DM"
+                        t.slot.name = t.name
                 else:
                     # au moins un clip réellement stéréo : les clips double mono
                     # partent sur une nouvelle piste mono
                     for c in conv:
-                        ed.add_to_new_track(t, "MONO", c.position, ed.mono_component(c, 0))
+                        ed.add_to_new_track(t, mono_suffix, c.position, ed.mono_component(c, 0))
                         if mute_r:
                             r = ed.mono_component(c, 1)
                             if plan.mute_method != "track":
                                 r = ed.muted(r, plan.mute_method)
-                            ed.add_to_new_track(t, "MONO R MUTE", c.position, r)
+                            ed.add_to_new_track(t, mono_suffix + " R MUTE", c.position, r)
                         ed.blank(c)
-                    log(f"Track \"{t.name}\": {len(conv)} dual-mono clips moved to \"{t.name} MONO\" "
+                    log(f"Track \"{t.name}\": {len(conv)} dual-mono clips moved to \"{t.name} {mono_suffix}\" "
                         f"({len(others)} stereo clips kept)")
                 stats["mono"] += len(conv)
 

@@ -40,6 +40,7 @@ jobs:
           pyinstaller --noconfirm --windowed --name BetterAAF $ICON \
             --osx-bundle-identifier fr.benjaminmartin.betteraaf \
             --add-data "assets:assets" \
+            --add-data "betteraaf/models:betteraaf/models" \
             --collect-all soundfile --collect-all _soundfile_data \
             --hidden-import aaf2 \
             BetterAAF.py
@@ -49,6 +50,8 @@ jobs:
           ./dist/BetterAAF.app/Contents/MacOS/BetterAAF --selftest "$RUNNER_TEMP/t/test.aaf"
           python tests/check_aaf.py "$RUNNER_TEMP/t/test.aaf" "$RUNNER_TEMP/t/test_selftest.aaf" | tee check.txt
           ! grep -q "^ERR" check.txt
+      - name: Model included
+        run: test -f dist/BetterAAF.app/Contents/Resources/betteraaf/models/yamnet.npz || test -f dist/BetterAAF.app/Contents/Frameworks/betteraaf/models/yamnet.npz || (echo "YAMNet model missing from the app" && find dist -name "yamnet*" && exit 1)
       - name: Zip
         run: |
           cd dist && ditto -c -k --sequesterRsrc --keepParent BetterAAF.app "../BetterAAF-${{ matrix.arch }}.zip"
@@ -73,7 +76,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ls -la dl
-          TAG="v1.2-build${{ github.run_number }}"
+          TAG="v1.3-build${{ github.run_number }}"
           gh release create "$TAG" dl/*.zip -R "${{ github.repository }}" \
             --title "BetterAAF (build ${{ github.run_number }})" \
             --notes "BetterAAF-AppleSilicon.zip: M1/M2/M3/M4 Macs. BetterAAF-Intel.zip: Intel Macs. Unzip, then drag BetterAAF.app to Applications."

@@ -1,0 +1,38 @@
+name: Export YAMNet model
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - tools/export_yamnet.py
+      - .github/workflows/model.yml
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dependencies
+        run: pip install "tensorflow-cpu==2.15.*" numpy soundfile
+      - name: Official YAMNet code, weights and test audio
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/tensorflow/models tfmodels
+          git -C tfmodels sparse-checkout set research/audioset/yamnet
+          curl -fsSL -o yamnet.h5 https://storage.googleapis.com/audioset/yamnet.h5
+          curl -fsSL -o speech_whistling2.wav https://storage.googleapis.com/audioset/speech_whistling2.wav
+          curl -fsSL -o betteraaf/models/ontology.json https://raw.githubusercontent.com/audioset/ontology/master/ontology.json
+          cp tfmodels/research/audioset/yamnet/yamnet_class_map.csv betteraaf/models/
+      - name: Export and check against TensorFlow
+        run: python tools/export_yamnet.py
+      - name: Commit model
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add betteraaf/models
+          git diff --cached --quiet || git commit -m "YAMNet model (exported and checked against TensorFlow)"
+          git push
