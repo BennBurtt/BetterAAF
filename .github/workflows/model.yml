@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Dependencies
-        run: pip install "tensorflow-cpu==2.15.*" numpy soundfile
+        run: pip install "tensorflow-cpu==2.15.*" "tf-keras==2.15.*" numpy soundfile
       - name: Official YAMNet code, weights and test audio
         run: |
           git clone --depth 1 --filter=blob:none --sparse https://github.com/tensorflow/models tfmodels
