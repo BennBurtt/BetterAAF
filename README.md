@@ -22,6 +22,12 @@ Cleans up an AAF before the mix: duplicate clips, near-identical clips (null tes
 - Dual mono: make mono, deleting or muting the right channel. A stereo track that also holds true stereo
   clips keeps them, and its dual-mono clips move to a new “… MONO” track.
 - **Self-contained AAF**: every audio file is embedded in one AAF.
+- **Rename tracks by content** (on by default): Google's YAMNet model listens to every clip and each track is
+  renamed Dialogue, Music, FX or Others. Extra categories can be ticked in the Tracks tab (Singing, Vocal sounds,
+  Walla, Foley, Vehicles, Animals, Impacts, Ambience). Names can be edited before export.
+- **Rename tracks DM for dual mono** (on by default): tracks coming from a dual-mono conversion get a “DM” suffix.
+- **Levels** of the whole AAF played together: average / min / max in dBFS and LUFS (ITU-R BS.1770-4),
+  plus true peak. Muted clips and tracks are skipped, clip gain and fades are applied, mono tracks are centred.
 
 ## Known limits
 

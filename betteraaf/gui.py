@@ -14,10 +14,10 @@ from PyQt6.QtWidgets import (
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
     QFrame, QCheckBox, QPlainTextEdit, QMessageBox, QAbstractItemView, QStyleFactory)
 
-from . import model, media, analysis, writer, classify
+from . import model, media, analysis, writer, classify, levels
 
 APP = "BetterAAF"
-VERSION = "1.3"
+VERSION = "1.4"
 ACCENT = "#8E4FD0"
 
 
@@ -34,6 +34,9 @@ QLabel#Subtitle {{ color: palette(placeholder-text); }}
 QLabel#Muted {{ color: palette(placeholder-text); }}
 QLabel#Warn {{ color: #D9822B; }}
 QLabel#Section {{ font-weight: 600; }}
+QLabel#Big {{ font-size: 17px; font-weight: 700; }}
+QLabel#Small {{ font-size: 11px; color: palette(placeholder-text); }}
+QLabel#RowHead {{ font-weight: 600; color: palette(placeholder-text); }}
 QFrame#Card {{ border: 1px solid palette(midlight); border-radius: 10px; }}
 QFrame#Drop {{ border: 2px dashed palette(mid); border-radius: 12px; }}
 QFrame#Drop[active="true"] {{ border: 2px dashed {ACCENT}; }}
@@ -188,7 +191,7 @@ class Main(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP)
-        self.resize(1140, 860)
+        self.resize(1180, 880)
         self.setMinimumSize(900, 640)
         self.setAcceptDrops(True)
         self.settings = QSettings("BenjaminMartin", APP)
@@ -253,11 +256,19 @@ class Main(QMainWindow):
         g.addWidget(self.sp_dm, 1, 3)
         self.cb_comp = QComboBox()
         self.cb_comp.setVisible(False)
-        g.addWidget(self.cb_comp, 1, 4)
         self.b_analyze = QPushButton("Analyze")
         self.b_analyze.setObjectName("Primary")
         self.b_analyze.clicked.connect(self.analyze)
         g.addWidget(self.b_analyze, 1, 5)
+        self.ck_levels = self.check("Measure levels (whole AAF played together)", "levels", True)
+        self.ck_levels.setToolTip("Mix of all tracks: muted clips and tracks skipped, clip gain and fades applied,\n"
+                                  "mono tracks centred (-3 dB pan law). Track volume automation is ignored.")
+        lv_row = QHBoxLayout()
+        lv_row.addSpacing(16)
+        lv_row.addWidget(self.ck_levels)
+        lv_row.addWidget(self.cb_comp)
+        lv_row.addStretch(1)
+        g.addLayout(lv_row, 1, 4)
         g.setColumnStretch(4, 1)
         v.addLayout(g)
 
@@ -269,6 +280,7 @@ class Main(QMainWindow):
         self.status.setObjectName("Muted")
         v.addWidget(self.progress)
         v.addWidget(self.status)
+        v.addWidget(self.make_levels_card())
 
         # --- results
         self.tabs = QTabWidget()
@@ -390,6 +402,63 @@ class Main(QMainWindow):
         ck.setChecked(self.settings.value(key, "true" if default else "false") == "true")
         ck.toggled.connect(lambda on, k=key: self.settings.setValue(k, "true" if on else "false"))
         return ck
+
+    def make_levels_card(self):
+        card = QFrame()
+        card.setObjectName("Card")
+        g = QGridLayout(card)
+        g.setContentsMargins(16, 10, 16, 10)
+        g.setHorizontalSpacing(28)
+        g.setVerticalSpacing(2)
+        title = QLabel("Levels")
+        title.setObjectName("Section")
+        g.addWidget(title, 0, 0)
+        for j, h in enumerate(["Average", "Min", "Max"], 1):
+            lb = QLabel(h)
+            lb.setObjectName("RowHead")
+            g.addWidget(lb, 0, j)
+        self.lv = {}
+        for i, unit in enumerate(["dBFS", "LUFS"], 1):
+            lb = QLabel(unit)
+            lb.setObjectName("RowHead")
+            g.addWidget(lb, i, 0)
+            for j in range(1, 4):
+                box = QVBoxLayout()
+                box.setSpacing(0)
+                big = QLabel("–")
+                big.setObjectName("Big")
+                small = QLabel("")
+                small.setObjectName("Small")
+                box.addWidget(big)
+                box.addWidget(small)
+                g.addLayout(box, i, j)
+                self.lv[(unit, j)] = (big, small)
+        g.setColumnStretch(4, 1)
+        card.setVisible(False)
+        self.levels_card = card
+        return card
+
+    def show_levels(self, r):
+        if not r:
+            self.levels_card.setVisible(False)
+            return
+        f = levels.fmt
+        vals = {
+            ("dBFS", 1): (f(r["rms_avg"]), "RMS, silence excluded"),
+            ("dBFS", 2): (f(r["rms_min"]), "quietest 3 s (RMS)"),
+            ("dBFS", 3): (f(r["peak"]), f"sample peak · true peak {f(r['true_peak'])}"),
+            ("LUFS", 1): (f(r.get("integrated")), "integrated"),
+            ("LUFS", 2): (f(r.get("short_min")), "short-term min"),
+            ("LUFS", 3): (f(r.get("short_max")), f"short-term max · momentary {f(r.get('momentary_max'))}"),
+        }
+        for k, (big, small) in vals.items():
+            self.lv[k][0].setText(big)
+            self.lv[k][1].setText(small)
+        hot = r["true_peak"] > -1.0
+        self.lv[("dBFS", 3)][0].setStyleSheet("color: #D9822B;" if hot else "")
+        self.levels_card.setToolTip(f"{r['clips']} clips, {r['duration'] / 60:.1f} min at {r['sample_rate']} Hz. "
+                                    "Muted clips/tracks skipped, clip gain and fades applied, mono centred (-3 dB).")
+        self.levels_card.setVisible(True)
 
     def make_tracks_page(self):
         w = QWidget()
@@ -534,6 +603,7 @@ class Main(QMainWindow):
             t.setRowCount(0)
         self.comp = None
         self.refresh_tracks()
+        self.show_levels(None)
         self.cb_comp.clear()
         self.cb_comp.addItems(names)
         self.cb_comp.setVisible(len(names) > 1)
@@ -567,6 +637,7 @@ class Main(QMainWindow):
         self.comp_index = max(0, self.cb_comp.currentIndex())
         ci = self.comp_index
         listen = self.ck_rename.isChecked()
+        measure = self.ck_levels.isChecked()
 
         def job(w):
             with aaf2.open(path, "r") as f:
@@ -578,9 +649,14 @@ class Main(QMainWindow):
                                        stop=lambda: w.cancel)
                 if listen:
                     classify.classify_composition(list(comp.all_clips()), pool,
-                                                  progress=lambda x, m: w.progress.emit(0.5 + x / 2, m),
+                                                  progress=lambda x, m: w.progress.emit(0.5 + x / 4, m),
                                                   stop=lambda: w.cancel, log=w.logline.emit)
+                lv = None
+                if measure:
+                    lv = levels.measure(comp, pool, progress=lambda x, m: w.progress.emit(0.75 + x / 4, m),
+                                        stop=lambda: w.cancel, log=w.logline.emit)
                 pool.close()
+                comp.levels = lv
                 return comp, res, self.make_rows(comp, res), dict(pool.paths)
 
         self.log_box.clear()
@@ -612,6 +688,13 @@ class Main(QMainWindow):
         self.comp = comp
         self.edited_names = {}
         self.refresh_tracks()
+        self.show_levels(getattr(comp, "levels", None))
+        lv = getattr(comp, "levels", None)
+        if lv:
+            f = levels.fmt
+            self.log(f"Levels: {f(lv.get('integrated'))} LUFS integrated, short-term {f(lv.get('short_min'))} to "
+                     f"{f(lv.get('short_max'))} LUFS, RMS {f(lv['rms_avg'])} dBFS, peak {f(lv['peak'])} dBFS, "
+                     f"true peak {f(lv['true_peak'])} dBTP.")
         ex, nr, dm = rows
         self.t_exact.fill(ex)
         self.t_near.fill(nr)

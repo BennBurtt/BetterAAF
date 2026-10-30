@@ -62,6 +62,9 @@ class Clip:
     s0: int = 0                # début en échantillons (timeline)
     s1: int = 0                # fin en échantillons
     votes: dict = None         # contenu détecté (classify.py)
+    gain: float = 1.0          # gain de clip constant (linéaire)
+    fade_in: int = 0           # fondus (unités d'édition de la piste)
+    fade_out: int = 0
 
     @property
     def nch(self):
@@ -81,6 +84,7 @@ class Track:
     phys: int
     sequence: object
     clips: list = field(default_factory=list)
+    muted: bool = False        # piste mutée (AudioMixerCompMute)
 
 
 @dataclass
@@ -92,6 +96,7 @@ class Composition:
     tc_fps: int
     tc_rate: Fraction  # edit rate du slot timecode
     drop: bool = False
+    levels: dict = None
 
     def all_clips(self):
         for t in self.tracks:
@@ -256,11 +261,27 @@ def clip_name(sc):
     return "(sans nom)"
 
 
+def clip_gain(wrappers):
+    """Produit des gains de clip constants (Audio Gain / Mono Audio Gain)."""
+    g = 1.0
+    for w in wrappers:
+        try:
+            if "gain" not in (w.operation.name or "").lower():
+                continue
+            for p in w.parameters:
+                if "Value" in p.keys():
+                    g *= float(p["Value"].value)
+        except Exception:
+            pass
+    return g
+
+
 def build_clip(uid, track, index, pos, comp):
     info = {}
     inner, wrappers = unwrap(comp, info)
     clip = Clip(uid, track, index, int(pos), int(comp.length), "", "unknown",
                 component=comp, wrappers=wrappers, muted=bool(info.get("muted")))
+    clip.gain = clip_gain(wrappers)
     try:
         if isinstance(inner, SourceClip):
             clip.name = clip_name(inner)
@@ -364,12 +385,27 @@ def read_composition(f, mob, normalize=False):
             items = list(seg.positions())
         else:
             items = [(0, 0, seg)]
+        by_index = {}
         for index, pos, comp in items:
             if isinstance(comp, (Filler, Transition)):
                 continue
             if isinstance(comp, (SourceClip, OperationGroup, Selector)):
-                t.clips.append(build_clip(uid, t, index, pos, comp))
+                c = build_clip(uid, t, index, pos, comp)
+                t.clips.append(c)
+                by_index[index] = c
                 uid += 1
+        for index, pos, comp in items:
+            if isinstance(comp, Transition):
+                if index - 1 in by_index:
+                    by_index[index - 1].fade_out = int(comp.length)
+                if index + 1 in by_index:
+                    by_index[index + 1].fade_in = int(comp.length)
+        try:
+            for tv in slot["TimelineMobAttributeList"].value or []:
+                if tv.name == "AudioMixerCompMute" and tv.value:
+                    t.muted = True
+        except Exception:
+            pass
         tracks.append(t)
     return Composition(mob, mob.name or "Composition", tracks, tc_start, fps, tc_rate, drop)
 

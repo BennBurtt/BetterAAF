@@ -17,6 +17,10 @@ def selftest(path):
             assert any(c for _t, c in cats), "content detection produced nothing"
         else:
             print("content detection: model not present")
+        from betteraaf import levels
+        lv = levels.measure(comp, pool)
+        print("levels:", {k: round(v, 2) for k, v in lv.items() if isinstance(v, float)})
+        assert lv and lv["peak"] > -60, "level measurement failed"
     print("exact", len(r.exact), "near", len(r.near), "dualmono", len(r.dualmono), "warnings", r.warnings)
     assert (len(r.exact), len(r.near), len(r.dualmono)) == (2, 2, 4), "unexpected results"
     plan = writer.Plan(exact_uids=[x.clip.uid for x in r.exact], near_uids=[x.clip.uid for x in r.near],
