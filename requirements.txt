@@ -1,0 +1,4 @@
+pyaaf2==1.7.1
+numpy
+soundfile
+PyQt6

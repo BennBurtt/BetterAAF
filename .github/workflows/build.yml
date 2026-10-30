@@ -1,0 +1,44 @@
+name: Build BetterAAF.app
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest       # Apple Silicon (M1, M2, M3, M4…)
+            arch: AppleSilicon
+          - runner: macos-15-intel     # Mac Intel
+            arch: Intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Compilation
+        run: |
+          pyinstaller --noconfirm --windowed --name BetterAAF \
+            --osx-bundle-identifier fr.benjaminmartin.betteraaf \
+            --collect-all soundfile --collect-all _soundfile_data \
+            --hidden-import aaf2 \
+            BetterAAF.py
+      - name: Auto-test de l'appli compilée
+        run: |
+          python tests/make_test_aaf.py "$RUNNER_TEMP/t"
+          ./dist/BetterAAF.app/Contents/MacOS/BetterAAF --selftest "$RUNNER_TEMP/t/test.aaf"
+      - name: Zip
+        run: |
+          cd dist && ditto -c -k --sequesterRsrc --keepParent BetterAAF.app "../BetterAAF-${{ matrix.arch }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BetterAAF-${{ matrix.arch }}
+          path: BetterAAF-${{ matrix.arch }}.zip
