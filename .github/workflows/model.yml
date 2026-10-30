@@ -28,7 +28,16 @@ jobs:
           curl -fsSL -o betteraaf/models/ontology.json https://raw.githubusercontent.com/audioset/ontology/master/ontology.json
           cp tfmodels/research/audioset/yamnet/yamnet_class_map.csv betteraaf/models/
       - name: Export and check against TensorFlow
-        run: python tools/export_yamnet.py
+        run: python tools/export_yamnet.py 2>&1 | tee export_log.txt; exit ${PIPESTATUS[0]}
+      - name: Publish log on failure
+        if: failure()
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout -B ci-logs
+          git add -f export_log.txt
+          git commit -m "export log"
+          git push -f origin ci-logs
       - name: Commit model
         run: |
           git config user.name "github-actions"
