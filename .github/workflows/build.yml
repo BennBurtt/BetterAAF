@@ -50,12 +50,25 @@ jobs:
             BetterAAF.py
       - name: Auto-test de l'appli compilée
         run: |
-          python tests/make_test_aaf.py "$RUNNER_TEMP/t"
-          ./dist/BetterAAF.app/Contents/MacOS/BetterAAF --selftest "$RUNNER_TEMP/t/test.aaf"
-          python tests/make_test_videos.py --pyav "$RUNNER_TEMP/v"
-          ./dist/BetterAAF.app/Contents/MacOS/BetterAAF --videotest "$RUNNER_TEMP/v"
+          set -o pipefail
+          python tests/make_test_aaf.py "$RUNNER_TEMP/t" 2>&1 | tee -a test_log.txt
+          ./dist/BetterAAF.app/Contents/MacOS/BetterAAF --selftest "$RUNNER_TEMP/t/test.aaf" 2>&1 | tee -a test_log.txt
+          python tests/make_test_videos.py --pyav "$RUNNER_TEMP/v" 2>&1 | tee -a test_log.txt
+          ./dist/BetterAAF.app/Contents/MacOS/BetterAAF --videotest "$RUNNER_TEMP/v" 2>&1 | tee -a test_log.txt
           python tests/check_aaf.py "$RUNNER_TEMP/t/test.aaf" "$RUNNER_TEMP/t/test_selftest.aaf" | tee check.txt
           ! grep -q "^ERR" check.txt
+      - name: Publish test log
+        if: always()
+        run: |
+          cp test_log.txt "$RUNNER_TEMP/test_log_${{ matrix.arch }}.txt" 2>/dev/null || echo "no log" > "$RUNNER_TEMP/test_log_${{ matrix.arch }}.txt"
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout --orphan "ci-logs-${{ matrix.arch }}"
+          git rm -rf --cached . > /dev/null
+          cp "$RUNNER_TEMP/test_log_${{ matrix.arch }}.txt" .
+          git add -f "test_log_${{ matrix.arch }}.txt"
+          git commit -m "test log ${{ matrix.arch }}"
+          git push -f origin "ci-logs-${{ matrix.arch }}"
       - name: Model included
         run: test -f dist/BetterAAF.app/Contents/Resources/betteraaf/models/yamnet.npz || test -f dist/BetterAAF.app/Contents/Frameworks/betteraaf/models/yamnet.npz || (echo "YAMNet model missing from the app" && find dist -name "yamnet*" && exit 1)
       - name: Zip
