@@ -47,7 +47,13 @@ def selftest(path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 2 and sys.argv[1] == "--selftest":
+    if len(sys.argv) > 2 and sys.argv[1] == "--videotest":
+        from betteraaf import video
+        errs = video.self_test(sys.argv[2])
+        print("VIDEO ERRORS", errs)
+        assert errs == 0, "video decoding is not frame accurate"
+        print("VIDEOTEST OK")
+    elif len(sys.argv) > 2 and sys.argv[1] == "--selftest":
         selftest(sys.argv[2])
     else:
         from betteraaf.gui import main

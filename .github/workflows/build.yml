@@ -15,6 +15,8 @@ jobs:
           - runner: macos-15-intel     # Mac Intel
             arch: Intel
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,12 +45,15 @@ jobs:
             --add-data "betteraaf/models:betteraaf/models" \
             --collect-all soundfile --collect-all _soundfile_data \
             --collect-all _sounddevice_data --hidden-import sounddevice \
+            --collect-all av \
             --hidden-import aaf2 \
             BetterAAF.py
       - name: Auto-test de l'appli compilée
         run: |
           python tests/make_test_aaf.py "$RUNNER_TEMP/t"
           ./dist/BetterAAF.app/Contents/MacOS/BetterAAF --selftest "$RUNNER_TEMP/t/test.aaf"
+          python tests/make_test_videos.py --pyav "$RUNNER_TEMP/v"
+          ./dist/BetterAAF.app/Contents/MacOS/BetterAAF --videotest "$RUNNER_TEMP/v"
           python tests/check_aaf.py "$RUNNER_TEMP/t/test.aaf" "$RUNNER_TEMP/t/test_selftest.aaf" | tee check.txt
           ! grep -q "^ERR" check.txt
       - name: Model included
@@ -77,7 +82,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ls -la dl
-          TAG="v1.7-build${{ github.run_number }}"
+          TAG="v1.8-build${{ github.run_number }}"
           gh release create "$TAG" dl/*.zip -R "${{ github.repository }}" \
             --title "BetterAAF (build ${{ github.run_number }})" \
             --notes "BetterAAF-AppleSilicon.zip: M1/M2/M3/M4 Macs. BetterAAF-Intel.zip: Intel Macs. Unzip, then drag BetterAAF.app to Applications."

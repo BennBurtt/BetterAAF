@@ -164,6 +164,13 @@ class MediaPool:
         self._index = None
         self._tmp = []
         self.ffmpeg = find_ffmpeg()
+        self.exts = AUDIO_EXT
+
+    def add_extensions(self, exts):
+        new = tuple(e for e in exts if e not in self.exts)
+        if new:
+            self.exts = self.exts + new
+            self._index = None
 
     # ---------- recherche des fichiers ----------
     def index(self):
@@ -175,7 +182,7 @@ class MediaPool:
                 for dp, dn, fn in os.walk(root):
                     dn[:] = [d for d in dn if not d.startswith(".")]
                     for name in fn:
-                        if name.lower().endswith(AUDIO_EXT):
+                        if name.lower().endswith(self.exts):
                             self._index.setdefault(name.lower(), os.path.join(dp, name))
                             count += 1
                     if count > 200000:

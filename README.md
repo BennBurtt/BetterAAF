@@ -41,6 +41,10 @@ A read-only mini player (switch RESULTS / PLAYER above the results):
 - Speeds ×1, ×1.5, ×2, ×4, ×10. Fast dBFS peak meter on every track.
 - Original / After BetterAAF: hear the AAF as it is, or as it will be exported with the current settings.
 - Audio goes to the output selected in macOS, stereo L/R only.
+- Video from the AAF's picture track (MOV, MP4, MXF; ProRes, DNxHD/DNxHR, H.264, H.265), locked to the
+  audio clock (the sample actually reaching the speakers). Frames are picked by time from the AAF edit rates
+  and the file's own frame rate. H.264/H.265 use VideoToolbox hardware decoding when available.
+  The video can be hidden or popped out to its own window (double-click the picture).
 
 ## Known limits
 

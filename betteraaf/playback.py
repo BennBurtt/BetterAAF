@@ -96,6 +96,7 @@ class Engine:
         self._feeder = None
         self._gen = 0
         self.reached_end = False
+        self._clk = None          # (position du bloc, vitesse, instant où il sort, source d'horloge)
 
     # ------------------------------------------------------------ loading
     def load(self, path, comp_index=0, media_dirs=()):
@@ -241,9 +242,34 @@ class Engine:
         else:
             mix = np.zeros((BLOCK, 2), np.float32)
         outdata[:] = np.clip(mix, -1.0, 1.0)
+        # horloge : instant où ce bloc atteint réellement le convertisseur (DAC)
+        dac, src = None, "perf"
+        if t is not None:
+            try:
+                dac = float(t.outputBufferDacTime)
+                src = "stream"
+                if dac <= 0:
+                    dac = float(self.stream.time) + float(self.stream.latency)
+            except Exception:
+                dac, src = None, "perf"
+        if dac is None:
+            dac, src = time.perf_counter(), "perf"
+        self._clk = (fp, sp, dac, src)
         self.pos = fp + BLOCK * sp
         if self.pos >= self.end:
             self.reached_end = True
+
+    def heard_pos(self):
+        """Timeline sample currently coming out of the speakers."""
+        if not self.playing or self._clk is None:
+            return self.pos
+        fp, sp, dac, src = self._clk
+        try:
+            now = float(self.stream.time) if src == "stream" else time.perf_counter()
+        except Exception:
+            now = time.perf_counter()
+        s = fp + (now - dac) * self.sr * sp
+        return min(max(s, fp - BLOCK * sp), fp + 3 * BLOCK * sp)
 
     # ------------------------------------------------------------ transport
     def play(self):
@@ -252,6 +278,7 @@ class Engine:
         if self.pos >= self.end:
             self.pos = float(self.start)
         self.reached_end = False
+        self._clk = None
         with self.lock:
             self._gen += 1
             self.queue.clear()
@@ -293,6 +320,7 @@ class Engine:
 
     def seek(self, sample):
         sample = float(min(max(sample, self.start), self.end))
+        self._clk = None
         with self.lock:
             self._gen += 1 if self.playing else 0
             self.queue.clear()

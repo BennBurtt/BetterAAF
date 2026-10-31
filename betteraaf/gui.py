@@ -24,7 +24,7 @@ from . import model, media, analysis, writer, classify, levels
 from .player import Player, Switch
 
 APP = "BetterAAF"
-VERSION = "1.7"
+VERSION = "1.8"
 
 INK = "#0A0A0A"        # fond
 PANEL = "#131313"
@@ -102,6 +102,8 @@ QFrame#Seg {{ background: {FIELD}; border: 1px solid {LINE}; border-radius: 8px;
 QPushButton#SegBtn {{ border: none; border-radius: 6px; padding: 5px 10px; color: {GREY}; font-weight: 600; }}
 QPushButton#SegBtn:checked {{ background: {PAPER}; color: {INK}; }}
 QPushButton#SegBtn:hover:!checked {{ color: {PAPER}; }}
+QPushButton#Small {{ padding: 4px 10px; font-size: 12px; }}
+QPushButton#Small:checked {{ background: #2A2A2A; border-color: {PAPER}; }}
 QToolTip {{ background: {FIELD}; color: {PAPER}; border: 1px solid {LINE}; padding: 6px; }}
 """
 
