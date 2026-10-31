@@ -1,0 +1,33 @@
+/Users/runner/work/_temp/t/test.aaf
+content: [('DIAL', 'FX'), ('DIAL 2', 'FX'), ('DIAL 3', 'FX'), ('DIAL 4', 'FX'), ('AMB ST', 'Music'), ('FX ST', 'Others'), ('MUS.L', 'Others'), ('MUS.R', 'Others')]
+levels: {'duration': 9.0, 'integrated': -5.59, 'momentary_max': -0.75, 'short_max': -4.23, 'short_min': -7.63, 'peak': 5.87, 'true_peak': 5.95, 'rms_avg': -8.63, 'rms_min': -10.6, 'rms_max': -7.22}
+player render peak: 0.2809070348739624 tracks: 8
+sounddevice 0.5.6 PortAudio PortAudio V19.7.0-devel, revision unknown
+exact 2 near 2 dualmono 4 warnings []
+Track "AMB ST": 1 dual-mono clips moved to "AMB ST DM" (1 stereo clips kept)
+Track "FX ST" converted to mono (2 clips)
+New track: DIAL 4 MUTE (muted)
+New track: AMB ST DM
+1 audio file(s) embedded in the AAF (3 MB)
+{'deleted': 3, 'muted': 2, 'mono': 4, 'new_tracks': 2, 'skipped': 0, 'embedded': 1, 'missing_media': 0}
+SELFTEST OK
+prores_proxy /Users/runner/work/_temp/v/prores_proxy.mov 75 frames
+prores_422hq /Users/runner/work/_temp/v/prores_422hq.mov 72 frames
+prores_4444 /Users/runner/work/_temp/v/prores_4444.mov 90 frames
+dnxhr_lb /Users/runner/work/_temp/v/dnxhr_lb.mov 75 frames
+dnxhr_hqx /Users/runner/work/_temp/v/dnxhr_hqx.mxf 150 frames
+h264_gop50 /Users/runner/work/_temp/v/h264_gop50.mp4 75 frames
+h264_2997 /Users/runner/work/_temp/v/h264_2997.mov 90 frames
+hevc_gop48 /Users/runner/work/_temp/v/hevc_gop48.mp4 72 frames
+hevc_25 /Users/runner/work/_temp/v/hevc_25.mov 75 frames
+  dnxhr_hqx.mxf      dnxhd    50.000 fps  SW  errors 0/57  random 4.2 ms  continuous 2.2 ms/frame  
+  dnxhr_lb.mov       dnxhd    25.000 fps  SW  errors 0/57  random 2.5 ms  continuous 1.7 ms/frame  
+  h264_2997.mov      h264     29.970 fps  SW  errors 0/57  random 11.0 ms  continuous 1.6 ms/frame  HW 1.6 ms / SW 1.5 ms
+  h264_gop50.mp4     h264     25.000 fps  HW  errors 0/57  random 12.5 ms  continuous 1.5 ms/frame  HW 1.6 ms / SW 1.9 ms
+  hevc_25.mov        hevc     25.000 fps  SW  errors 0/57  random 13.0 ms  continuous 3.6 ms/frame  HW 8.1 ms / SW 2.1 ms
+  hevc_gop48.mp4     hevc     24.000 fps  SW  errors 0/57  random 17.1 ms  continuous 3.5 ms/frame  HW 5.8 ms / SW 1.8 ms
+  prores_422hq.mov   prores   23.976 fps  SW  errors 0/57  random 6.1 ms  continuous 3.1 ms/frame  
+  prores_4444.mov    prores   29.970 fps  SW  errors 0/57  random 12.5 ms  continuous 5.0 ms/frame  
+  prores_proxy.mov   prores   25.000 fps  SW  errors 0/57  random 3.1 ms  continuous 2.3 ms/frame  
+VIDEO ERRORS 0
+VIDEOTEST OK
