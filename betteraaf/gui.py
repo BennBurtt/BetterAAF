@@ -10,18 +10,21 @@ import traceback
 
 import aaf2
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
-from PyQt6.QtGui import QAction, QColor, QPixmap, QIcon, QPalette
+from PyQt6.QtGui import QAction, QColor, QPixmap, QIcon, QPalette, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QFileDialog, QDoubleSpinBox, QComboBox,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
     QFrame, QCheckBox, QPlainTextEdit, QMessageBox, QAbstractItemView, QStyleFactory,
-    QScrollArea)
+    QScrollArea, QStackedWidget)
+
+import tempfile
 
 from . import model, media, analysis, writer, classify, levels
+from .player import Player, Switch
 
 APP = "BetterAAF"
-VERSION = "1.6"
+VERSION = "1.7"
 
 INK = "#0A0A0A"        # fond
 PANEL = "#131313"
@@ -95,6 +98,10 @@ QScrollBar::handle:vertical {{ background: #333; border-radius: 4px; min-height:
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar:horizontal {{ background: transparent; height: 9px; }}
 QScrollBar::handle:horizontal {{ background: #333; border-radius: 4px; min-width: 30px; }}
+QFrame#Seg {{ background: {FIELD}; border: 1px solid {LINE}; border-radius: 8px; }}
+QPushButton#SegBtn {{ border: none; border-radius: 6px; padding: 5px 10px; color: {GREY}; font-weight: 600; }}
+QPushButton#SegBtn:checked {{ background: {PAPER}; color: {INK}; }}
+QPushButton#SegBtn:hover:!checked {{ color: {PAPER}; }}
 QToolTip {{ background: {FIELD}; color: {PAPER}; border: 1px solid {LINE}; padding: 6px; }}
 """
 
@@ -301,6 +308,13 @@ class Main(QMainWindow):
             cb.currentIndexChanged.connect(self.update_notes)
         self.ck_dm.toggled.connect(self.update_notes)
         self.update_notes()
+        self.on_view_switch(False)
+
+        for keys, fn in (("Space", lambda: self.player.toggle_play()),
+                         ("Shift+S", lambda: self.player.toggle_solo()),
+                         ("Shift+M", lambda: self.player.toggle_mute())):
+            sc = QShortcut(QKeySequence(keys), self)
+            sc.activated.connect(lambda fn=fn: self.player_visible() and fn())
 
         act = QAction("Open…", self)
         act.setShortcut("Ctrl+O")
@@ -452,7 +466,33 @@ class Main(QMainWindow):
         lv.setContentsMargins(12, 10, 12, 10)
         lv.addWidget(self.log_box)
         self.tabs.addTab(lw, "Log")
-        v.addWidget(self.tabs, 1)
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self.lb_results = QLabel("RESULTS")
+        self.lb_results.setObjectName("Section")
+        self.sw_view = Switch()
+        self.sw_view.toggled.connect(self.on_view_switch)
+        self.lb_player = QLabel("PLAYER")
+        self.lb_player.setObjectName("Section")
+        row.addWidget(self.lb_results)
+        row.addWidget(self.sw_view)
+        row.addWidget(self.lb_player)
+        row.addStretch(1)
+        v.addLayout(row)
+
+        self.player = Player(log=self.log)
+        self.player.sourceRequested.connect(self.on_player_source)
+        self.player_wrap = QFrame()
+        self.player_wrap.setObjectName("Panel")
+        pw = QVBoxLayout(self.player_wrap)
+        pw.setContentsMargins(0, 0, 0, 0)
+        pw.addWidget(self.player)
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.tabs)
+        self.stack.addWidget(self.player_wrap)
+        v.addWidget(self.stack, 1)
+        self.player_loaded = None
         return col
 
     def make_levels_card(self):
@@ -686,6 +726,13 @@ class Main(QMainWindow):
             out[it.data(Qt.ItemDataRole.UserRole)] = it.text()
         return out
 
+    def closeEvent(self, e):
+        try:
+            self.player.engine.close()
+        except Exception:
+            pass
+        super().closeEvent(e)
+
     # ---------- drag & drop ----------
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls():
@@ -746,6 +793,7 @@ class Main(QMainWindow):
         self.cb_comp.setVisible(len(names) > 1)
         self.drop.title.setText(os.path.basename(path))
         self.drop.sub.setText(names[0])
+        self.reset_player()
         self.analyze()
 
     def media_dirs(self):
@@ -854,11 +902,75 @@ class Main(QMainWindow):
             for w in res.warnings:
                 self.log("  • " + w)
             self.log("\nIf audio files are missing, set the “Audio files folder” and analyze again.")
+        if self.player_loaded == "after":
+            self.reset_player()
         msg = f"Done. {len(comp.tracks)} tracks, {res.n_clips} clips."
         if n_warn:
             msg += f"  ⚠ {n_warn} clip(s) could not be analyzed, see Log."
         self.status.setText(msg)
         self.progress.setValue(1000)
+
+    # ---------- player ----------
+    def player_visible(self):
+        return self.stack.currentIndex() == 1
+
+    def on_view_switch(self, on):
+        self.stack.setCurrentIndex(1 if on else 0)
+        self.lb_results.setStyleSheet("" if on else f"color: {PAPER};")
+        self.lb_player.setStyleSheet(f"color: {PAPER};" if on else "")
+        if on and self.aaf_path and self.player_loaded is None:
+            self.on_player_source("original")
+        if not on:
+            self.player.engine.stop()
+            self.player.b_play.setText("▶  PLAY")
+
+    def on_player_source(self, which):
+        if not self.aaf_path:
+            return
+        from PyQt6.QtWidgets import QApplication
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.player.engine.stop()
+            dirs = self.media_dirs()
+            if which == "after":
+                if not self.results:
+                    QMessageBox.information(self, APP, "Analyze the AAF first to hear the BetterAAF result.")
+                    self.player.g_src.button(0).setChecked(True)
+                    return
+                tmp = os.path.join(tempfile.gettempdir(), "BetterAAF_preview.aaf")
+                writer.export(self.aaf_path, tmp, self.comp_index, self.results, self.make_plan(),
+                              log=lambda *_: None)
+                # les médias liés se cherchent aussi à côté de l'AAF d'origine
+                self.player.load(tmp, 0, dirs + [os.path.dirname(self.aaf_path)], "after")
+                self.log("Player: BetterAAF result loaded (current settings, nothing written to disk "
+                         "besides a temporary preview).")
+            else:
+                self.player.load(self.aaf_path, self.comp_index, dirs, "original")
+            self.player_loaded = which
+        except Exception as e:  # noqa
+            self.log(f"Player error: {e}")
+            QMessageBox.warning(self, APP, f"The player could not load this AAF:\n{e}")
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def reset_player(self):
+        self.player.unload()
+        self.player_loaded = None
+        self.player.b_play.setText("▶  PLAY")
+        if self.player_visible() and self.aaf_path:
+            self.on_player_source("original")
+
+    def make_plan(self):
+        acts = ["delete", "mute", "none"]
+        return writer.Plan(
+            dup_action=acts[self.cb_exact.currentIndex()],
+            near_action=acts[self.cb_near.currentIndex()],
+            dm_action=["mono_delete", "mono_mute", "none"][self.cb_dm.currentIndex()],
+            mute_method=["track", "gain", "avid"][self.cb_mute.currentIndex()],
+            exact_uids=self.t_exact.checked(), near_uids=self.t_near.checked(),
+            dm_uids=self.t_dm.checked(),
+            track_names=self.track_names() if self.ck_rename.isChecked() else {},
+            dm_tag=self.ck_dm.isChecked())
 
     # ---------- export ----------
     def export(self):
@@ -873,16 +985,7 @@ class Main(QMainWindow):
         if os.path.abspath(dst) == os.path.abspath(self.aaf_path):
             QMessageBox.warning(self, APP, "Please choose another name: the original AAF is never overwritten.")
             return
-        acts = ["delete", "mute", "none"]
-        plan = writer.Plan(
-            dup_action=acts[self.cb_exact.currentIndex()],
-            near_action=acts[self.cb_near.currentIndex()],
-            dm_action=["mono_delete", "mono_mute", "none"][self.cb_dm.currentIndex()],
-            mute_method=["track", "gain", "avid"][self.cb_mute.currentIndex()],
-            exact_uids=self.t_exact.checked(), near_uids=self.t_near.checked(),
-            dm_uids=self.t_dm.checked(),
-            track_names=self.track_names() if self.ck_rename.isChecked() else {},
-            dm_tag=self.ck_dm.isChecked())
+        plan = self.make_plan()
         embed = self.ck_embed.isChecked()
         src, res, ci, dirs = self.aaf_path, self.results, self.comp_index, self.media_dirs()
 

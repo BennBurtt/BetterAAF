@@ -31,6 +31,17 @@ Cleans up an AAF before the mix: duplicate clips, near-identical clips (null tes
   pan and fades written in the AAF are applied. Plug-ins and buses are not included. DaVinci Resolve does not
   write its volume automation into AAFs, so Resolve exports are measured before the mix automation.
 
+## Player
+
+A read-only mini player (switch RESULTS / PLAYER above the results):
+
+- Click anywhere on the timeline to move the playhead, Space to play / stop.
+- Shift+S / Shift+M toggle solo / mute on the selected track (playback only, the export is not affected).
+- Playhead modes: return to the clicked position after stopping, or stay where playback stopped.
+- Speeds ×1, ×1.5, ×2, ×4, ×10. Fast dBFS peak meter on every track.
+- Original / After BetterAAF: hear the AAF as it is, or as it will be exported with the current settings.
+- Audio goes to the output selected in macOS, stereo L/R only.
+
 ## Known limits
 
 - Clips moved to a new track (MUTE or MONO) lose their fades.
