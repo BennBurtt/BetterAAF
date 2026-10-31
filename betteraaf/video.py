@@ -58,11 +58,18 @@ class VideoFile:
         self.codec = codec_name
         self.intra = codec_name in INTRA
         c = None
+        self.bench = ""
         if hw and sys.platform == "darwin" and codec_name in ("h264", "hevc"):
+            # on mesure : décodage matériel (VideoToolbox) contre logiciel, on garde le plus rapide
             try:
-                from av.codec.hwaccel import HWAccel
-                c = av.open(self.path, hwaccel=HWAccel(device_type="videotoolbox", allow_software_fallback=True))
-                self.hw_used = True
+                hw_ms = self._bench(True)
+                sw_ms = self._bench(False)
+                self.bench = f"HW {hw_ms:.1f} ms / SW {sw_ms:.1f} ms"
+                if hw_ms < sw_ms:
+                    from av.codec.hwaccel import HWAccel
+                    c = av.open(self.path, hwaccel=HWAccel(device_type="videotoolbox",
+                                                           allow_software_fallback=True))
+                    self.hw_used = True
             except Exception as e:  # noqa
                 self.log(f"Video: hardware decoding unavailable for {os.path.basename(self.path)} ({e})")
                 c = None
@@ -90,6 +97,30 @@ class VideoFile:
         self.next_idx = None     # index of the next frame the decoder will output
         self.cur = None          # (idx, av.VideoFrame) last decoded
         self.keyframe_only = False
+
+    def _bench(self, hw, n=12):
+        """Average ms per frame (decode + RGB conversion) over the first frames."""
+        if hw:
+            from av.codec.hwaccel import HWAccel
+            c = av.open(self.path, hwaccel=HWAccel(device_type="videotoolbox", allow_software_fallback=True))
+        else:
+            c = av.open(self.path)
+        try:
+            st = c.streams.video[0]
+            st.thread_type = "AUTO"
+            got, t = 0, None
+            for fr in c.decode(st):
+                if t is None:          # la première image paie l'initialisation
+                    VideoFile.to_rgb(fr, 960)
+                    t = time.perf_counter()
+                    continue
+                VideoFile.to_rgb(fr, 960)
+                got += 1
+                if got >= n:
+                    break
+            return (time.perf_counter() - t) * 1000 / max(1, got) if t else 1e9
+        finally:
+            c.close()
 
     def describe(self):
         prof = ""
@@ -221,8 +252,16 @@ def self_test(folder, log=print):
             if got is None or read_test_code(VideoFile.to_rgb(got[1], 640)) != i:
                 bad += 1
         ms = (time.perf_counter() - t) * 1000 / len(idxs)
+        # lecture continue (le cas de la lecture à x1)
+        t = time.perf_counter()
+        vf.frame(0)
+        for i in range(1, min(n, 60)):
+            vf.frame(i)
+            VideoFile.to_rgb(vf.cur[1], 960)
+        seq = (time.perf_counter() - t) * 1000 / max(1, min(n, 60) - 1)
         log(f"  {os.path.basename(path):18} {vf.codec:7} {float(vf.fps):7.3f} fps  "
-            f"{'HW' if vf.hw_used else 'SW'}  errors {bad}/{len(idxs)}  {ms:.1f} ms/frame")
+            f"{'HW' if vf.hw_used else 'SW'}  errors {bad}/{len(idxs)}  random {ms:.1f} ms  "
+            f"continuous {seq:.1f} ms/frame  {vf.bench}")
         errors += bad
         vf.close()
     return errors
