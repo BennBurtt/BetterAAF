@@ -63,6 +63,8 @@ class Clip:
     s1: int = 0                # fin en échantillons
     votes: dict = None         # contenu détecté (classify.py)
     gain: float = 1.0          # gain de clip constant (linéaire)
+    gain_curves: list = field(default_factory=list)  # automations de volume [(t 0..1, valeurs, mode)]
+    pan_curve: tuple = None    # pan du clip (0 = gauche, 0.5 = centre, 1 = droite)
     fade_in: int = 0           # fondus (unités d'édition de la piste)
     fade_out: int = 0
 
@@ -85,6 +87,10 @@ class Track:
     sequence: object
     clips: list = field(default_factory=list)
     muted: bool = False        # piste mutée (AudioMixerCompMute)
+    gain: float = 1.0          # volume de piste constant
+    gain_curves: list = field(default_factory=list)   # automation de volume de piste
+    pan_curve: tuple = None
+    length: int = 0            # longueur de la séquence (unités d'édition)
 
 
 @dataclass
@@ -261,19 +267,72 @@ def clip_name(sc):
     return "(sans nom)"
 
 
-def clip_gain(wrappers):
-    """Produit des gains de clip constants (Audio Gain / Mono Audio Gain)."""
-    g = 1.0
-    for w in wrappers:
+GAIN_PARAMS = {"amplitude", "amplitude multiplier", "level", "avidcontrolclipratio", "gain", "volume"}
+IGNORED_PARAMS = {"panvol_istrimgaineffect", "avidparameterbyteorder", "avideffectid"}
+
+
+def _curve(prm, length):
+    """VaryingValue -> (times 0..1, values, mode) ; None si vide."""
+    import numpy as np
+    pts = []
+    for cp in prm["PointList"].value or []:
         try:
-            if "gain" not in (w.operation.name or "").lower():
-                continue
-            for p in w.parameters:
-                if "Value" in p.keys():
-                    g *= float(p["Value"].value)
+            pts.append((float(cp.time), float(cp.value)))
         except Exception:
             pass
-    return g
+    if not pts:
+        return None
+    pts.sort()
+    t = np.array([p[0] for p in pts])
+    v = np.array([p[1] for p in pts])
+    if t.max() > 1.0 + 1e-6 and length:
+        t = t / float(length)          # temps en unités d'édition -> fraction
+    mode = "linear"
+    try:
+        name = (prm["Interpolation"].value.name or "").lower()
+        if "constant" in name or "step" in name or "none" in name:
+            mode = "step"
+    except Exception:
+        pass
+    return (t, v, mode)
+
+
+def mix_params(wrappers):
+    """Gain constant, courbes de volume et pan lus dans des OperationGroups
+    (gain de clip, automation Avid/Pro Tools, Audio Pan)."""
+    g, curves, pan = 1.0, [], None
+    for w in wrappers:
+        try:
+            op = (w.operation.name or "").lower()
+            length = w.length
+            for prm in w.parameters:
+                pname = (prm.parameterdef.name or "").lower() if prm.parameterdef else ""
+                if pname in IGNORED_PARAMS:
+                    continue
+                varying = type(prm).__name__ == "VaryingValue"
+                if pname == "pan":
+                    if varying:
+                        pan = _curve(prm, length)
+                    elif "Value" in prm.keys():
+                        import numpy as np
+                        pan = (np.array([0.0]), np.array([float(prm["Value"].value)]), "linear")
+                    continue
+                if pname in GAIN_PARAMS or ("gain" in op and pname not in IGNORED_PARAMS and "pan" not in pname):
+                    if "pan" in op and pname not in GAIN_PARAMS:
+                        continue
+                    if varying:
+                        c = _curve(prm, length)
+                        if c is not None:
+                            curves.append(c)
+                    elif "Value" in prm.keys():
+                        g *= float(prm["Value"].value)
+        except Exception:
+            pass
+    return g, curves, pan
+
+
+def clip_gain(wrappers):
+    return mix_params(wrappers)[0]
 
 
 def build_clip(uid, track, index, pos, comp):
@@ -281,7 +340,7 @@ def build_clip(uid, track, index, pos, comp):
     inner, wrappers = unwrap(comp, info)
     clip = Clip(uid, track, index, int(pos), int(comp.length), "", "unknown",
                 component=comp, wrappers=wrappers, muted=bool(info.get("muted")))
-    clip.gain = clip_gain(wrappers)
+    clip.gain, clip.gain_curves, clip.pan_curve = mix_params(wrappers)
     try:
         if isinstance(inner, SourceClip):
             clip.name = clip_name(inner)
@@ -347,6 +406,15 @@ def track_sequence(slot):
     return seg
 
 
+def track_wrappers(slot):
+    """Effets de piste (Audio Pan, volume...) au-dessus de la Sequence."""
+    out, seg = [], slot.segment
+    while isinstance(seg, OperationGroup) and not is_combiner(seg) and len(list(seg.segments)) == 1:
+        out.append(seg)
+        seg = list(seg.segments)[0]
+    return out
+
+
 def set_track_sequence(slot, new_seq):
     """Remplace la Sequence d'une piste en gardant les effets de piste."""
     parent, seg = None, slot.segment
@@ -381,6 +449,11 @@ def read_composition(f, mob, normalize=False):
             seg = wrap_in_sequence(slot)
         t = Track(i, slot, slot.slot_id, slot.name or f"Audio {i + 1}",
                   frac(slot.edit_rate), prop(slot, "PhysicalTrackNumber", i + 1), seg)
+        t.gain, t.gain_curves, t.pan_curve = mix_params(track_wrappers(slot))
+        try:
+            t.length = int(slot.segment.length)
+        except Exception:
+            t.length = 0
         if isinstance(seg, Sequence):
             items = list(seg.positions())
         else:

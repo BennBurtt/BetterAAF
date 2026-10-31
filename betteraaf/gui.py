@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 from . import model, media, analysis, writer, classify, levels
 
 APP = "BetterAAF"
-VERSION = "1.5"
+VERSION = "1.6"
 
 INK = "#0A0A0A"        # fond
 PANEL = "#131313"
@@ -370,8 +370,8 @@ class Main(QMainWindow):
         self.ck_listen = self.check("Detect content (Google YAMNet)", "listen", True)
         self.ck_listen.setToolTip("Listens to every clip to tell dialogue, music, FX and others apart.")
         self.ck_levels = self.check("Measure levels (whole AAF)", "levels", True)
-        self.ck_levels.setToolTip("Mix of all tracks: muted clips and tracks skipped, clip gain and fades applied,\n"
-                                  "mono tracks centred (-3 dB pan law). Track volume automation is ignored.")
+        self.ck_levels.setToolTip("Mix of all tracks: muted clips and tracks skipped; clip gain, volume automation,\n"
+                                  "pan and fades found in the AAF are applied. Plug-ins and buses are not included.")
         if not classify.available():
             self.ck_listen.setChecked(False)
             self.ck_listen.setEnabled(False)
@@ -484,6 +484,10 @@ class Main(QMainWindow):
         g.setColumnStretch(2, 1)
         g.setColumnStretch(3, 1)
         cv.addLayout(g)
+        self.lv_note = QLabel(" ")
+        self.lv_note.setObjectName("Small")
+        self.lv_note.setWordWrap(True)
+        cv.addWidget(self.lv_note)
         return card
 
     def show_levels(self, r):
@@ -493,7 +497,25 @@ class Main(QMainWindow):
                 big.setText("–")
                 small.setText(" ")
                 big.setStyleSheet("")
+            self.lv_note.setText(" ")
+            self.lv_note.setStyleSheet("")
             return
+        parts = []
+        if r.get("auto_clips"):
+            parts.append(f"volume automation on {r['auto_clips']} clip(s)")
+        if r.get("auto_tracks"):
+            parts.append(f"volume automation on {r['auto_tracks']} track(s)")
+        if r.get("pan"):
+            parts.append(f"pan on {r['pan']} clip(s)/track(s)")
+        if r.get("clip_gain"):
+            parts.append(f"clip gain on {r['clip_gain']} clip(s)")
+        if r.get("auto_clips") or r.get("auto_tracks"):
+            self.lv_note.setText("Applied: " + ", ".join(parts) + ". Plug-ins and buses are not included.")
+            self.lv_note.setStyleSheet("")
+        else:
+            self.lv_note.setText("⚠  No volume automation in this AAF: levels are measured before the mix "
+                                 "automation" + (f" ({', '.join(parts)} applied)." if parts else "."))
+            self.lv_note.setStyleSheet(f"color: {WARN};")
         vals = {
             ("dBFS", 1): (f(r["rms_avg"]), "RMS, silence excluded"),
             ("dBFS", 2): (f(r["rms_min"]), "quietest 3 s (RMS)"),

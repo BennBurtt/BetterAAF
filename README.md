@@ -27,12 +27,15 @@ Cleans up an AAF before the mix: duplicate clips, near-identical clips (null tes
   Walla, Foley, Vehicles, Animals, Impacts, Ambience). Names can be edited before export.
 - **Rename tracks DM for dual mono** (on by default): tracks coming from a dual-mono conversion get a “DM” suffix.
 - **Levels** of the whole AAF played together: average / min / max in dBFS and LUFS (ITU-R BS.1770-4),
-  plus true peak. Muted clips and tracks are skipped, clip gain and fades are applied, mono tracks are centred.
+  plus true peak. Muted clips and tracks are skipped; clip gain, volume automation (clip and track level),
+  pan and fades written in the AAF are applied. Plug-ins and buses are not included. DaVinci Resolve does not
+  write its volume automation into AAFs, so Resolve exports are measured before the mix automation.
 
 ## Known limits
 
 - Clips moved to a new track (MUTE or MONO) lose their fades.
 - Fades and clip gain are not taken into account by the null test.
+- Level measurement only sees what the editing software wrote into the AAF (no plug-ins, no buses).
 - MXF media (Media Composer) needs ffmpeg installed (`brew install ffmpeg`). WAV / BWF / AIFF are read directly.
 
 ## Development

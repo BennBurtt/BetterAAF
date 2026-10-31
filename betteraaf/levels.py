@@ -2,9 +2,11 @@
 
 The mix is rendered block by block in stereo:
   - muted clips and muted tracks are skipped,
-  - constant clip gain is applied, fades/crossfades are applied as linear ramps,
-  - stereo clips go L/R, L/R track pairs go to their side, mono clips are centred (-3 dB pan law).
-Track volume/pan automation is not taken into account.
+  - clip gain and volume automation found in the AAF (clip and track level) are applied,
+  - fades/crossfades are applied as linear ramps,
+  - stereo clips go L/R, L/R track pairs go to their side, mono clips follow the pan found
+    in the AAF (centred by default, -3 dB constant-power pan law).
+Only what the editing software wrote into the AAF can be applied.
 """
 
 import math
@@ -44,21 +46,64 @@ def db(x):
     return 10 * math.log10(x) if x > 0 else -math.inf
 
 
+def eval_curve(curve, x):
+    """curve (t 0..1, v, mode) evaluated at fractions x."""
+    t, v, mode = curve
+    if len(t) == 1:
+        return np.full(len(x), v[0], dtype=np.float64)
+    if mode == "step":
+        idx = np.clip(np.searchsorted(t, x, side="right") - 1, 0, len(v) - 1)
+        return v[idx]
+    return np.interp(x, t, v)
+
+
 def envelope(c, a, b, track_sr_per_eu):
-    """Gain ramp for samples [a, b) relative to the clip start."""
+    """Gain for samples [a, b) relative to the clip start: clip gain, clip and track
+    volume automation, fades."""
     n = b - a
-    env = np.full(n, c.gain, dtype=np.float32)
-    total = c.s1 - c.s0
+    total = max(1, c.s1 - c.s0)
+    idx = np.arange(a, b)
+    env = np.full(n, c.gain * c.track.gain, dtype=np.float64)
+    if c.gain_curves:
+        x = (idx + 0.5) / total
+        for cv in c.gain_curves:
+            env *= eval_curve(cv, x)
+    if c.track.gain_curves:
+        tl = max(1.0, c.track.length * track_sr_per_eu)
+        x = (c.s0 + idx + 0.5) / tl
+        for cv in c.track.gain_curves:
+            env *= eval_curve(cv, x)
     fi = int(round(c.fade_in * track_sr_per_eu))
     fo = int(round(c.fade_out * track_sr_per_eu))
-    idx = np.arange(a, b)
     if fi > 0:
         m = idx < fi
         env[m] *= (idx[m] + 0.5) / fi
     if fo > 0:
         m = idx >= total - fo
         env[m] *= (total - idx[m] - 0.5) / fo
-    return env
+    return env.astype(np.float32)
+
+
+def pan_gains(c, a, b, track_sr_per_eu):
+    """(gain L, gain R) arrays for a mono clip, constant-power law (-3 dB at centre)."""
+    n = b - a
+    if c.pan_curve is not None:
+        p = eval_curve(c.pan_curve, (np.arange(a, b) + 0.5) / max(1, c.s1 - c.s0))
+    elif c.track.pan_curve is not None:
+        tl = max(1.0, c.track.length * track_sr_per_eu)
+        p = eval_curve(c.track.pan_curve, (c.s0 + np.arange(a, b) + 0.5) / tl)
+    else:
+        return PAN_MONO, PAN_MONO
+    p = np.clip(p, 0.0, 1.0)
+    return np.cos(p * np.pi / 2).astype(np.float32), np.sin(p * np.pi / 2).astype(np.float32)
+
+
+def automation_summary(clips, tracks):
+    nc = sum(1 for c in clips if c.gain_curves)
+    nt = sum(1 for t in tracks if t.gain_curves)
+    npan = sum(1 for c in clips if c.pan_curve is not None) + sum(1 for t in tracks if t.pan_curve is not None)
+    ng = sum(1 for c in clips if abs(c.gain - 1.0) > 1e-6)
+    return dict(auto_clips=nc, auto_tracks=nt, pan=npan, clip_gain=ng)
 
 
 def measure(comp, pool, progress=None, stop=None, log=print):
@@ -100,7 +145,8 @@ def measure(comp, pool, progress=None, stop=None, log=print):
                 continue
             a = max(b0, c.s0)
             e = min(b1_, c.s1)
-            env = envelope(c, a - c.s0, e - c.s0, sr / c.track.edit_rate)
+            spe = float(sr / c.track.edit_rate)
+            env = envelope(c, a - c.s0, e - c.s0, spe)
             dst = slice(a - b0, e - b0)
             try:
                 if c.nch == 1:
@@ -110,8 +156,9 @@ def measure(comp, pool, progress=None, stop=None, log=print):
                     elif c.side == "R":
                         mix[dst, 1] += x
                     else:
-                        mix[dst, 0] += x * PAN_MONO
-                        mix[dst, 1] += x * PAN_MONO
+                        gl, gr = pan_gains(c, a - c.s0, e - c.s0, spe)
+                        mix[dst, 0] += x * gl
+                        mix[dst, 1] += x * gr
                 else:
                     mix[dst, 0] += pool.read(c.channels[0], a - c.s0, e - a) * env
                     mix[dst, 1] += pool.read(c.channels[1], a - c.s0, e - a) * env
@@ -135,6 +182,7 @@ def measure(comp, pool, progress=None, stop=None, log=print):
     z = np.array(z_sub)
     u = np.array(u_sub)
     res = dict(duration=(end - start) / sr, sample_rate=sr, clips=len(clips))
+    res.update(automation_summary(clips, comp.tracks))
 
     # --- LUFS
     if len(z) >= 4:
