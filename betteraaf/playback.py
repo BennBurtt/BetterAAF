@@ -241,6 +241,8 @@ class Engine:
             self.peaks = np.where(mask, np.abs(data).max(axis=(1, 2)), 0.0)
         else:
             mix = np.zeros((BLOCK, 2), np.float32)
+        if not np.isfinite(mix).all():
+            mix = np.nan_to_num(mix, nan=0.0, posinf=0.0, neginf=0.0)
         outdata[:] = np.clip(mix, -1.0, 1.0)
         # horloge : instant où ce bloc atteint réellement le convertisseur (DAC)
         dac, src = None, "perf"

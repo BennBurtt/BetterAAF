@@ -76,12 +76,13 @@ class SoundFileSource(Source):
 class RawSource(Source):
     """PCM brut (embarqué dans l'AAF, ou décodé par ffmpeg)."""
 
-    def __init__(self, stream_factory, nch, sr, bits, big_endian=False, is_float=False, total=None):
+    def __init__(self, stream_factory, nch, sr, bits, big_endian=False, is_float=False, total=None, base=0):
         self.stream_factory = stream_factory
         self.nch, self.sr, self.bits = nch, sr, bits
         self.big, self.is_float = big_endian, is_float
         self.bpf = nch * bits // 8
         self.frames = total if total is not None else None
+        self.base = base            # début des échantillons dans le flux (après un éventuel en-tête)
         self._stream = None
 
     def stream(self):
@@ -99,7 +100,7 @@ class RawSource(Source):
         if b <= a:
             return out
         s = self.stream()
-        s.seek(a * self.bpf)
+        s.seek(self.base + a * self.bpf)
         raw = s.read((b - a) * self.bpf)
         cnt = len(raw) // self.bpf
         if cnt <= 0:
@@ -130,14 +131,41 @@ def decode_pcm(raw, bits, big=False, is_float=False):
     raise ValueError("unsupported bit depth: %d bits" % bits)
 
 
+def parse_wave_fmt(b):
+    """Contenu d'un chunk 'fmt ' -> dict (gère WAVE_FORMAT_EXTENSIBLE)."""
+    fmt, nch, sr, _bps, _ba, bits = struct.unpack("<HHIIHH", b[:16])
+    if fmt == 0xFFFE and len(b) >= 26:
+        fmt = struct.unpack("<H", b[24:26])[0]       # sous-format (GUID)
+    return dict(nch=nch, sr=sr, bits=bits, is_float=(fmt == 3))
+
+
 def parse_wave_summary(summary):
     """Summary d'un WAVEDescriptor = en-tête RIFF ; on y lit le chunk fmt."""
     b = bytes(summary)
     i = b.find(b"fmt ")
     if i < 0:
         return None
-    fmt, nch, sr, _bps, _ba, bits = struct.unpack("<HHIIHH", b[i + 8:i + 24])
-    return dict(nch=nch, sr=sr, bits=bits, is_float=(fmt == 3))
+    size = struct.unpack("<I", b[i + 4:i + 8])[0]
+    return parse_wave_fmt(b[i + 8:i + 8 + max(16, size)])
+
+
+def _ext80(b):
+    exp, mant = struct.unpack(">HQ", b[:10])
+    return int(round(mant * 2.0 ** ((exp & 0x7FFF) - 16383 - 63))) if exp else 48000
+
+
+def parse_aifc_comm(b, aifc=True):
+    nch, frames, bits = struct.unpack(">hIh", b[:8])
+    sr = _ext80(b[8:18])
+    comp = b[18:22] if aifc and len(b) >= 22 else b"NONE"
+    info = dict(nch=nch, sr=sr, bits=bits, is_float=False, big=True, frames=frames)
+    if comp in (b"sowt",):
+        info["big"] = False
+    elif comp in (b"fl32", b"FL32"):
+        info.update(is_float=True, bits=32)
+    elif comp in (b"fl64", b"FL64"):
+        info.update(is_float=True, bits=64)
+    return info
 
 
 def parse_aifc_summary(summary):
@@ -145,11 +173,57 @@ def parse_aifc_summary(summary):
     i = b.find(b"COMM")
     if i < 0:
         return None
-    nch, _frames, bits = struct.unpack(">hIh", b[i + 8:i + 16])
-    # sample rate en 80 bits IEEE extended
-    exp, mant = struct.unpack(">HQ", b[i + 16:i + 26])
-    sr = int(mant * 2.0 ** (exp - 16383 - 63)) if exp else 48000
-    return dict(nch=nch, sr=sr, bits=bits, is_float=False, big=True)
+    return parse_aifc_comm(b[i + 8:], aifc=b"AIFC" in b[:12] or b.find(b"AIFC") >= 0)
+
+
+def parse_container(stream):
+    """Si le flux embarqué contient un fichier WAV/RF64/AIFF complet (cas de Pro Tools),
+    renvoie son format et la position des échantillons ; sinon None (PCM brut)."""
+    try:
+        stream.seek(0)
+        head = stream.read(12)
+    except Exception:
+        return None
+    if len(head) < 12:
+        return None
+    if head[:4] in (b"RIFF", b"RF64", b"BW64") and head[8:12] == b"WAVE":
+        pos, info = 12, None
+        for _ in range(64):
+            stream.seek(pos)
+            h = stream.read(8)
+            if len(h) < 8:
+                break
+            cid, size = h[:4], struct.unpack("<I", h[4:])[0]
+            if cid == b"fmt ":
+                info = parse_wave_fmt(stream.read(max(16, size)))
+            elif cid == b"data":
+                if info is None:
+                    return None
+                info["base"] = pos + 8
+                if size not in (0, 0xFFFFFFFF):
+                    info["frames"] = size // max(1, info["nch"] * info["bits"] // 8)
+                return info
+            pos += 8 + size + (size & 1)
+        return None
+    if head[:4] == b"FORM" and head[8:12] in (b"AIFF", b"AIFC"):
+        aifc = head[8:12] == b"AIFC"
+        pos, info = 12, None
+        for _ in range(64):
+            stream.seek(pos)
+            h = stream.read(8)
+            if len(h) < 8:
+                break
+            cid, size = h[:4], struct.unpack(">I", h[4:])[0]
+            if cid == b"COMM":
+                info = parse_aifc_comm(stream.read(size), aifc)
+            elif cid == b"SSND":
+                if info is None:
+                    return None
+                off = struct.unpack(">I", stream.read(4))[0]
+                info["base"] = pos + 16 + off
+                return info
+            pos += 8 + size + (size & 1)
+    return None
 
 
 class MediaPool:
@@ -165,6 +239,7 @@ class MediaPool:
         self._tmp = []
         self.ffmpeg = find_ffmpeg()
         self.exts = AUDIO_EXT
+        self.suspect = set()
 
     def add_extensions(self, exts):
         new = tuple(e for e in exts if e not in self.exts)
@@ -245,22 +320,36 @@ class MediaPool:
             raise IOError("media file not found (%s)" % (mob.name or mob_id))
         self.paths[mob_id] = path
         try:
-            return SoundFileSource(path)
+            src = SoundFileSource(path)
+            src.kind = f"file · {src.f.format} {src.f.subtype} · {src.nch} ch · {src.sr} Hz"
+            return src
         except Exception:
-            return self._ffmpeg(path)
+            src = self._ffmpeg(path)
+            src.kind = f"file via ffmpeg · {src.nch} ch · {src.sr} Hz"
+            return src
 
     def _embedded(self, d, ess):
-        info = None
-        if isinstance(d, aaf_essence.WAVEDescriptor):
-            info = parse_wave_summary(prop(d, "Summary", b""))
-        elif isinstance(d, aaf_essence.AIFCDescriptor):
-            info = parse_aifc_summary(prop(d, "Summary", b""))
+        # 1) le flux contient-il un fichier complet (en-tête RIFF/AIFF) ?
+        st = ess.open("r")
+        info = parse_container(st)
+        kind = "embedded file"
+        if info is None:
+            kind = "embedded PCM"
+            if isinstance(d, aaf_essence.WAVEDescriptor):
+                info = parse_wave_summary(prop(d, "Summary", b""))
+            elif isinstance(d, aaf_essence.AIFCDescriptor):
+                info = parse_aifc_summary(prop(d, "Summary", b""))
         if info is None:
             info = dict(nch=prop(d, "Channels", 1) or 1,
                         sr=int(round(float(prop(d, "AudioSamplingRate", 0) or prop(d, "SampleRate", 48000)))),
                         bits=prop(d, "QuantizationBits", 24) or 24, is_float=False)
-        return RawSource(lambda: ess.open("r"), info["nch"], info["sr"], info["bits"],
-                         info.get("big", False), info.get("is_float", False))
+        total = info.get("frames") if kind == "embedded file" else None
+        src = RawSource(lambda st=st: st, info["nch"], info["sr"], info["bits"],
+                        info.get("big", False), info.get("is_float", False), total=total,
+                        base=info.get("base", 0))
+        src.kind = (f"{kind} · {'float' if info.get('is_float') else 'PCM'} {info['bits']}-bit · "
+                    f"{info['nch']} ch · {info['sr']} Hz" + (" · big-endian" if info.get("big") else ""))
+        return src
 
     def _ffmpeg(self, path):
         if not self.ffmpeg:
@@ -283,6 +372,12 @@ class MediaPool:
             raise IOError("ffmpeg could not decode %s" % os.path.basename(path))
         size = os.path.getsize(tmp)
         return RawSource(lambda: open(tmp, "rb"), nch, sr, 32, False, True, size // (4 * nch))
+
+    def summary(self):
+        """Résumé des types de médias lus (pour le journal)."""
+        from collections import Counter
+        c = Counter(getattr(src, "kind", "?") for src in self.sources.values() if src is not None)
+        return [f"{n} × {k}" for k, n in c.most_common()]
 
     def close(self):
         for p in self._tmp:

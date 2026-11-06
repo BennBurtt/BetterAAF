@@ -24,7 +24,7 @@ from . import model, media, analysis, writer, classify, levels
 from .player import Player, Switch
 
 APP = "BetterAAF"
-VERSION = "1.8"
+VERSION = "1.9"
 
 INK = "#0A0A0A"        # fond
 PANEL = "#131313"
@@ -842,8 +842,10 @@ class Main(QMainWindow):
                 if measure:
                     lv = levels.measure(comp, pool, progress=lambda x, m: w.progress.emit(0.75 + x / 4, m),
                                         stop=lambda: w.cancel, log=w.logline.emit)
+                media_kinds = pool.summary()
                 pool.close()
                 comp.levels = lv
+                comp.media_kinds = media_kinds
                 return comp, res, self.make_rows(comp, res), dict(pool.paths)
 
         self.log_box.clear()
@@ -899,6 +901,8 @@ class Main(QMainWindow):
         self.log(f"{len(ex)} duplicates, {len(nr)} near-identical, {len(dm)} dual mono.")
         if paths:
             self.log(f"{len(paths)} external audio file(s) found.")
+        for k in getattr(comp, "media_kinds", []) or []:
+            self.log("Audio media read: " + k)
         if n_warn:
             self.log("\nClips not analyzed:")
             for w in res.warnings:
