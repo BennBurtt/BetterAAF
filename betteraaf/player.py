@@ -357,6 +357,29 @@ class VideoView(QWidget):
         self.pl.toggle_popout()
 
 
+class VideoWindow(QWidget):
+    """Floating video window. Closing it docks the video back into the player."""
+
+    def __init__(self, on_close):
+        super().__init__()
+        self._on_close = on_close
+        self.setWindowTitle("BetterAAF · Video")
+        self.setStyleSheet("background: #000;")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.resize(960, 560)
+
+    def closeEvent(self, e):
+        e.ignore()                       # le lecteur décide (remet la vidéo en place)
+        QTimer.singleShot(0, self._on_close)
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(e)
+
+
 class Player(QWidget):
     sourceRequested = pyqtSignal(str)     # "original" | "after"
 
@@ -517,26 +540,29 @@ class Player(QWidget):
 
     def toggle_popout(self):
         if self.popout is None:
-            self.popout = QWidget()
-            self.popout.setWindowTitle("BetterAAF · Video")
-            self.popout.setStyleSheet("background: #000;")
-            lay = QVBoxLayout(self.popout)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lay.addWidget(self.video_view)
-            self.popout.resize(960, 560)
-            self.popout.closeEvent = lambda e: (e.ignore(), self.toggle_popout())
-            self.popout.show()
+            win = VideoWindow(self.dock_video)
+            win.layout().addWidget(self.video_view)
+            win.show()
+            self.popout = win
             self.video_holder.setVisible(False)
             self.b_pop.setText("Dock")
         else:
-            self.video_holder.layout().addWidget(self.video_view)
-            self.popout.hide()
-            self.popout.deleteLater()
-            self.popout = None
-            self.video_holder.setVisible(self.b_video.isChecked())
-            self.b_pop.setText("Pop out")
+            self.dock_video()
+
+    def dock_video(self):
+        win, self.popout = self.popout, None
+        if win is None:
+            return
+        self.video_holder.layout().addWidget(self.video_view)
+        self.video_view.show()
+        win.hide()
+        win.deleteLater()
+        self.video_holder.setVisible(self.b_video.isChecked())
+        self.b_pop.setText("Pop out")
 
     def unload(self):
+        if self.popout is not None:
+            self.dock_video()
         if self.video is not None:
             self.video.close()
             self.video = None

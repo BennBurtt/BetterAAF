@@ -24,7 +24,7 @@ from . import model, media, analysis, writer, classify, levels
 from .player import Player, Switch
 
 APP = "BetterAAF"
-VERSION = "2.0"
+VERSION = "2.0.1"
 
 INK = "#0A0A0A"        # fond
 PANEL = "#131313"
@@ -730,6 +730,10 @@ class Main(QMainWindow):
 
     def closeEvent(self, e):
         try:
+            if self.player.popout is not None:
+                self.player.dock_video()
+            if self.player.video is not None:
+                self.player.video.close()
             self.player.engine.close()
         except Exception:
             pass
@@ -1054,7 +1058,33 @@ def setup_app(app):
         app.setWindowIcon(QIcon(icon))
 
 
+LOG_FILE = os.path.expanduser("~/Library/Logs/BetterAAF.log")
+
+
+def install_excepthook():
+    """Une erreur Python dans l'interface ne doit jamais fermer l'appli : on la note
+    dans le journal de l'appli et dans ~/Library/Logs/BetterAAF.log."""
+    def hook(etype, value, tb):
+        text = "".join(traceback.format_exception(etype, value, tb))
+        try:
+            os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+            with open(LOG_FILE, "a") as fh:
+                fh.write(text + "\n")
+        except Exception:
+            pass
+        try:
+            for w in QApplication.topLevelWidgets():
+                if isinstance(w, Main):
+                    w.log("Unexpected error (the app keeps running):\n" + text)
+                    w.status.setText("Unexpected error, see Log.")
+        except Exception:
+            pass
+        sys.__stderr__.write(text)
+    sys.excepthook = hook
+
+
 def main():
+    install_excepthook()
     app = QApplication(sys.argv)
     setup_app(app)
     win = Main()
