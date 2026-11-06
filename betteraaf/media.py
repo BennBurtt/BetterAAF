@@ -14,7 +14,8 @@ import soundfile as sf
 from aaf2 import essence as aaf_essence
 from .model import prop
 
-AUDIO_EXT = (".wav", ".bwf", ".aif", ".aiff", ".aifc", ".mxf")
+AUDIO_EXT = (".wav", ".bwf", ".aif", ".aiff", ".aifc", ".mxf", ".mov", ".mp4", ".m4a", ".mp3",
+             ".flac", ".caf", ".ogg", ".aac", ".mts", ".m2ts")
 
 
 def find_ffmpeg():
@@ -71,6 +72,127 @@ class SoundFileSource(Source):
             data = self.f.read(b - a, dtype="float32", always_2d=True)
             out[a - start:a - start + len(data)] = data
         return out
+
+
+class AVSource(Source):
+    """Any audio FFmpeg can read (MXF OP-Atom / OP1a, MOV, MP4, M4A, MP3...), through PyAV.
+    All audio streams are flattened into one channel list (stream 1 ch 1, stream 1 ch 2,
+    stream 2 ch 1...), which matches how NLEs number the tracks of camera files.
+    Random access: the file is decoded in 4-second chunks around the request, kept in a
+    small cache; sample positions come from the packet timestamps (sample accurate)."""
+
+    CHUNK_SEC = 4.0
+
+    def __init__(self, path):
+        import av
+        from collections import OrderedDict
+        self.av = av
+        self.path = path
+        self.c = av.open(path)
+        self.streams = list(self.c.streams.audio)
+        if not self.streams:
+            raise IOError("no audio stream")
+        self.map = []
+        for si, st in enumerate(self.streams):
+            n = st.codec_context.channels or 1
+            for ch in range(n):
+                self.map.append((si, ch))
+        self.nch = len(self.map)
+        self.sr = int(self.streams[0].sample_rate or self.streams[0].codec_context.sample_rate)
+        st0 = self.streams[0]
+        if st0.duration and st0.time_base:
+            self.frames = int(round(float(st0.duration * st0.time_base) * self.sr))
+        elif self.c.duration:
+            self.frames = int(round(self.c.duration / 1e6 * self.sr))
+        else:
+            self.frames = 10 ** 12
+        self.offsets = []
+        for st in self.streams:
+            stt = st.start_time or 0
+            self.offsets.append(stt if stt > 0 else 0)   # échantillon 0 = début du média
+        self.chunk = int(self.CHUNK_SEC * self.sr)
+        self.cache = OrderedDict()
+        self.kind = "file via FFmpeg · " + ", ".join(
+            f"{st.codec_context.name} {st.codec_context.channels}ch" for st in self.streams) + f" · {self.sr} Hz"
+
+    def _decode_chunk(self, k):
+        s0, s1 = k * self.chunk, (k + 1) * self.chunk
+        buf = np.zeros((self.chunk, self.nch), dtype=np.float32)
+        first_col = {}
+        col = 0
+        for si, st in enumerate(self.streams):
+            first_col[si] = col
+            col += st.codec_context.channels or 1
+        st0 = self.streams[0]
+        target = int((max(0, s0 - self.sr // 2) / self.sr) / float(st0.time_base)) + self.offsets[0]
+        try:
+            self.c.seek(target, stream=st0, backward=True, any_frame=False)
+        except Exception:
+            self.c.seek(0)
+        done = set()
+        for pkt in self.c.demux(*self.streams):
+            si = self.streams.index(pkt.stream)
+            if si in done:
+                if len(done) == len(self.streams):
+                    break
+                continue
+            try:
+                frames = pkt.decode()
+            except Exception:
+                continue
+            for fr in frames:
+                if fr.pts is None:
+                    continue
+                st = self.streams[si]
+                start = int(round(float((fr.pts - self.offsets[si]) * st.time_base) * self.sr))
+                x = fr.to_ndarray()
+                nchs = st.codec_context.channels or 1
+                if x.ndim == 2 and x.shape[0] == 1 and nchs > 1 and not fr.format.is_planar:
+                    x = x.reshape(-1, nchs).T                     # entrelacé -> (canaux, échantillons)
+                x = _to_float(x, fr.format.name)
+                n = x.shape[1]
+                a, b = max(start, s0), min(start + n, s1)
+                if b > a:
+                    buf[a - s0:b - s0, first_col[si]:first_col[si] + nchs] = x[:, a - start:b - start].T
+                if start >= s1:
+                    done.add(si)
+            if len(done) == len(self.streams):
+                break
+        return buf
+
+    def read(self, start, n):
+        out = np.zeros((n, self.nch), dtype=np.float32)
+        a, b = max(start, 0), min(start + n, self.frames)
+        pos = a
+        while pos < b:
+            k = pos // self.chunk
+            chunk = self.cache.get(k)
+            if chunk is None:
+                chunk = self._decode_chunk(k)
+                self.cache[k] = chunk
+                while len(self.cache) > 24:
+                    self.cache.popitem(last=False)
+            else:
+                self.cache.move_to_end(k)
+            c0 = pos - k * self.chunk
+            take = min(b - pos, self.chunk - c0)
+            out[pos - start:pos - start + take] = chunk[c0:c0 + take]
+            pos += take
+        return out
+
+
+def _to_float(x, fmt):
+    """Échantillons PyAV (s16, s32, flt, dbl, u8, planaires ou non) -> float32."""
+    f = fmt.rstrip("p")
+    if f == "s16":
+        return x.astype(np.float32) / 32768.0
+    if f == "s32":
+        return x.astype(np.float32) / 2147483648.0
+    if f == "u8":
+        return (x.astype(np.float32) - 128.0) / 128.0
+    if f == "s64":
+        return (x.astype(np.float64) / 9.223372036854776e18).astype(np.float32)
+    return x.astype(np.float32)
 
 
 class RawSource(Source):
@@ -324,9 +446,17 @@ class MediaPool:
             src.kind = f"file · {src.f.format} {src.f.subtype} · {src.nch} ch · {src.sr} Hz"
             return src
         except Exception:
+            pass
+        try:
+            return AVSource(path)          # MXF, MOV, MP4, M4A, MP3... (FFmpeg intégré)
+        except Exception as e:  # noqa
+            first = e
+        try:
             src = self._ffmpeg(path)
             src.kind = f"file via ffmpeg · {src.nch} ch · {src.sr} Hz"
             return src
+        except Exception:
+            raise IOError(f"cannot read {os.path.basename(path)} ({first})")
 
     def _embedded(self, d, ess):
         # 1) le flux contient-il un fichier complet (en-tête RIFF/AIFF) ?

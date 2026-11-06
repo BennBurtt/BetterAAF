@@ -51,7 +51,10 @@ A read-only mini player (switch RESULTS / PLAYER above the results):
 - Clips moved to a new track (MUTE or MONO) lose their fades.
 - Fades and clip gain are not taken into account by the null test.
 - Level measurement only sees what the editing software wrote into the AAF (no plug-ins, no buses).
-- MXF media (Media Composer) needs ffmpeg installed (`brew install ffmpeg`). WAV / BWF / AIFF are read directly.
+- Audio media: WAV / BWF / RF64 / AIFF / AIFC / FLAC (linked or embedded, PCM 16/24/32 and float),
+  MXF OP-Atom (Media Composer), camera MXF OP1a and MOV with several tracks (tracks numbered in order),
+  MP4 / M4A (AAC, ALAC) and MP3, through the FFmpeg libraries bundled with the app. Files at another sample
+  rate than the session (44.1 kHz music in a 48 kHz session) are resampled on the fly.
 
 ## Development
 

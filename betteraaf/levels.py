@@ -46,6 +46,32 @@ def db(x):
     return 10 * math.log10(x) if x > 0 else -math.inf
 
 
+def conform_rates(clips, sr):
+    """Clips at another sample rate (44.1 kHz music in a 48 kHz session...): their
+    positions are expressed at the session rate and they are resampled on the fly."""
+    from fractions import Fraction
+    for c in clips:
+        if c.sr and c.sr != sr and getattr(c, "ratio", 1.0) == 1.0:
+            e = c.track.edit_rate
+            c.ratio = c.sr / float(sr)
+            c.s0 = int(round(Fraction(c.position) * sr / e))
+            c.s1 = int(round(Fraction(c.position + c.length) * sr / e))
+            c.sr = sr
+
+
+def read_clip(pool, c, ci, off, n):
+    """n samples of channel ci of clip c at the session rate, from `off` (clip-relative)."""
+    ratio = getattr(c, "ratio", 1.0)
+    ch = c.channels[ci]
+    if ratio == 1.0:
+        return pool.read(ch, off, n)
+    pos = (off + np.arange(n)) * ratio
+    i0 = int(math.floor(pos[0])) if n else 0
+    m = int(math.ceil(pos[-1])) - i0 + 2 if n else 0
+    src = pool.read(ch, i0, max(1, m)).astype(np.float64)
+    return np.interp(pos - i0, np.arange(len(src)), src).astype(np.float32)
+
+
 def eval_curve(curve, x):
     """curve (t 0..1, v, mode) evaluated at fractions x."""
     t, v, mode = curve
@@ -113,10 +139,11 @@ def measure(comp, pool, progress=None, stop=None, log=print):
     if not clips:
         return None
     sr = Counter(c.sr for c in clips).most_common(1)[0][0]
-    skipped = [c for c in clips if c.sr != sr]
-    if skipped:
-        log(f"Levels: {len(skipped)} clip(s) at another sample rate were left out.")
-    clips = sorted((c for c in clips if c.sr == sr), key=lambda c: c.s0)
+    others = [c for c in clips if c.sr != sr]
+    if others:
+        log(f"Levels: {len(others)} clip(s) at another sample rate resampled to {sr} Hz.")
+        conform_rates(others, sr)
+    clips = sorted(clips, key=lambda c: c.s0)
     start, end = min(c.s0 for c in clips), max(c.s1 for c in clips)
 
     hop = sr // 10                      # 100 ms sub-blocks
@@ -150,7 +177,7 @@ def measure(comp, pool, progress=None, stop=None, log=print):
             dst = slice(a - b0, e - b0)
             try:
                 if c.nch == 1:
-                    x = pool.read(c.channels[0], a - c.s0, e - a) * env
+                    x = read_clip(pool, c, 0, a - c.s0, e - a) * env
                     if c.side == "L":
                         mix[dst, 0] += x
                     elif c.side == "R":
@@ -160,8 +187,8 @@ def measure(comp, pool, progress=None, stop=None, log=print):
                         mix[dst, 0] += x * gl
                         mix[dst, 1] += x * gr
                 else:
-                    mix[dst, 0] += pool.read(c.channels[0], a - c.s0, e - a) * env
-                    mix[dst, 1] += pool.read(c.channels[1], a - c.s0, e - a) * env
+                    mix[dst, 0] += read_clip(pool, c, 0, a - c.s0, e - a) * env
+                    mix[dst, 1] += read_clip(pool, c, 1, a - c.s0, e - a) * env
             except Exception:  # noqa
                 continue
         peak = max(peak, float(np.max(np.abs(mix))) if n else 0.0)

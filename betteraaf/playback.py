@@ -107,18 +107,20 @@ class Engine:
         comp = model.read_composition(self.f, mob)
         self.pool = media.MediaPool(self.f, path, media_dirs, log=self.log)
         clips = analysis.prepare_clips(comp, self.pool, self.log)
+        analysis.pair_split_stereo(clips)          # pistes Piste.L / Piste.R : à gauche / à droite
         self.comp = comp
         self.tracks = comp.tracks
         playable = [c for c in clips if not c.muted and not analysis.is_muted(c)]
         rates = collections.Counter(c.sr for c in playable)
         self.sr = rates.most_common(1)[0][0] if rates else 48000
+        levels.conform_rates([c for c in clips if c.sr != self.sr], self.sr)
         self.clips_by_track = []
         self.starts_by_track = []
         for t in self.tracks:
-            cl = sorted((c for c in playable if c.track is t and c.sr == self.sr), key=lambda c: c.s0)
+            cl = sorted((c for c in playable if c.track is t), key=lambda c: c.s0)
             self.clips_by_track.append(cl)
             self.starts_by_track.append([c.s0 for c in cl])
-        allc = [c for c in clips if c.sr == self.sr] or clips
+        allc = clips
         self.start = min((c.s0 for c in allc), default=0)
         self.end = max((c.s1 for c in allc), default=self.sr * 10)
         self.mute = {t.index for t in self.tracks if t.muted}
@@ -174,7 +176,7 @@ class Engine:
                 dst = slice(a - s0i, e - s0i)
                 try:
                     if c.nch == 1:
-                        x = self.pool.read(c.channels[0], a - c.s0, e - a) * env
+                        x = levels.read_clip(self.pool, c, 0, a - c.s0, e - a) * env
                         if c.side == "L":
                             buf[dst, 0] += x
                         elif c.side == "R":
@@ -184,8 +186,8 @@ class Engine:
                             buf[dst, 0] += x * gl
                             buf[dst, 1] += x * gr
                     else:
-                        buf[dst, 0] += self.pool.read(c.channels[0], a - c.s0, e - a) * env
-                        buf[dst, 1] += self.pool.read(c.channels[1], a - c.s0, e - a) * env
+                        buf[dst, 0] += levels.read_clip(self.pool, c, 0, a - c.s0, e - a) * env
+                        buf[dst, 1] += levels.read_clip(self.pool, c, 1, a - c.s0, e - a) * env
                 except Exception:  # noqa
                     continue
             if buf is None:
