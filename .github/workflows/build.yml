@@ -10,11 +10,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-latest       # Apple Silicon (M1, M2, M3, M4…)
+          - runner: macos-15           # Apple Silicon (M1, M2, M3, M4…)
             arch: AppleSilicon
           - runner: macos-15-intel     # Mac Intel
             arch: Intel
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
     permissions:
       contents: write
     steps:
