@@ -13,7 +13,6 @@ import math
 from collections import Counter
 
 import numpy as np
-from scipy.signal import lfilter, lfilter_zi, resample_poly
 
 from . import analysis
 
@@ -133,6 +132,7 @@ def automation_summary(clips, tracks):
 
 
 def measure(comp, pool, progress=None, stop=None, log=print):
+    from scipy.signal import lfilter, lfilter_zi, resample_poly   # chargé seulement ici (démarrage rapide)
     clips = [c for c in comp.all_clips()
              if not c.error and c.channels and c.sr and not c.muted and not analysis.is_muted(c)
              and not c.track.muted]

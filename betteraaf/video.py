@@ -24,10 +24,15 @@ from fractions import Fraction
 
 import numpy as np
 
-try:
-    import av
-except Exception:  # noqa
-    av = None
+av = None          # PyAV (FFmpeg) est chargé à la première vidéo, pas au démarrage
+
+
+def _load_av():
+    global av
+    if av is None:
+        import av as _av
+        av = _av
+    return av
 
 from . import model
 
@@ -38,7 +43,8 @@ GOP_FORWARD_MAX = 90      # frames decoded forward before preferring a seek
 
 
 def available():
-    return av is not None
+    import importlib.util
+    return importlib.util.find_spec("av") is not None
 
 
 class VideoFile:
@@ -49,6 +55,7 @@ class VideoFile:
         self._open(hw)
 
     def _open(self, hw):
+        _load_av()
         self.c = None
         codec_name = None
         probe = av.open(self.path)
@@ -100,6 +107,7 @@ class VideoFile:
 
     def _bench(self, hw, n=12):
         """Average ms per frame (decode + RGB conversion) over the first frames."""
+        _load_av()
         if hw:
             from av.codec.hwaccel import HWAccel
             c = av.open(self.path, hwaccel=HWAccel(device_type="videotoolbox", allow_software_fallback=True))

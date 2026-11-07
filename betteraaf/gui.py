@@ -24,7 +24,7 @@ from . import model, media, analysis, writer, classify, levels
 from .player import Player, Switch
 
 APP = "BetterAAF"
-VERSION = "2.0.1"
+VERSION = "2.1"
 
 INK = "#0A0A0A"        # fond
 PANEL = "#131313"

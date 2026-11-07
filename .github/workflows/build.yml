@@ -98,7 +98,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ls -la dl
-          TAG="v2.0.1-build${{ github.run_number }}"
+          TAG="v2.1-build${{ github.run_number }}"
           gh release create "$TAG" dl/*.zip -R "${{ github.repository }}" \
             --title "BetterAAF (build ${{ github.run_number }})" \
             --notes "BetterAAF-AppleSilicon.zip: M1/M2/M3/M4 Macs. BetterAAF-Intel.zip: Intel Macs. Unzip, then drag BetterAAF.app to Applications."
